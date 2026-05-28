@@ -1,0 +1,12 @@
+auth cloud/
+auth-cloud/
+*.pem
+*.key
+id_ed25519
+id_ed25519.pub
+id_rsa
+id_rsa.pub
+bin/agent-cli.env
+.DS_Store
+Thumbs.db
+*.log
