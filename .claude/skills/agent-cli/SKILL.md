@@ -37,14 +37,15 @@ Run `<wrapper> <subcommand> --help` for real flags. Bold = most useful in the de
 
 | Subcommand | Purpose | Notable flags |
 |---|---|---|
-| **`dispatch`** | Generic HMAC-signed dispatch. Any registered op: `llm_call`, `service_call`, `tool_call`, `hive_publish`, `cap_check`, `cluster_info`, `workspace_create`, `provision_workspace`, etc. | `--workspace`, `--op`, `--params`, `--raw`, `--url` |
+| **`dispatch`** | Generic HMAC-signed dispatch. Any registered op: `llm_call`, `service_call`, `tool_call`, `hive_publish`, `cap_check`, `cluster_info`, `workspace_create`, `provision_workspace`, `prompt_template_list/get/set/delete`, `prompt_expand`, etc. | `--workspace`, `--op`, `--params`, `--raw`, `--url` |
 | **`policy`** | All 8 verbs: `show`, `trace`, `set`, `clear`, `lock`, `unlock`, `inventory`, `revoke`. See the "Policy cascade" section below for recipes. | `--workspace`, `--field`, `--value`, `--kind`, `--key`, `--target-tier`, `--target-id`, `--reason`, `--json` |
-| **`vars`** | Manage workspace-tier vars (PVC-backed). Verbs: `set`, `get`, `list`, `delete`. | `--workspace`, `--key`, `--value`, `--type {text\|secret}` |
+| **`vars`** | Manage workspace-tier vars (PVC-backed). Verbs: `set`, `get`, `list`, `delete`. Key vars: `system_prompt`, `chatbot` (chat persona), `expand_model` (Smart Expand LLM, e.g. `deepseek-chat`). | `--workspace`, `--key`, `--value`, `--type {text\|secret}` |
 | **`secret`** | Manage age-encrypted secrets. Verbs: `set`, `get-meta` (value NEVER returned), `list`, `delete`. | `--workspace`, `--repo`, `--key`, `--value`, `--service` |
 | **`workflow`** | Full DAG lifecycle. Verbs: `list`, `create`, `edit`, `duplicate`, `delete`, `run`, `validate`, `export`, `import`, `status`, `logs`, `cancel`, `approve`, `reject`, `resume`, `build`, `schedule {list\|enable\|disable}`. Per-workspace user pack when `--workspace` is set; global base pack otherwise. GUI Flows tab is a 1:1 view. | `--workspace`, `--id`, `--input`, `--worktree`, `--session`, `--resume`, `--reset-session` |
 | **`skill`** | Inspect/manage skill registry + versions. Actions: `list`, `show`, `activate` (defaults `--dry-run`), `create`, `fork`, `delete`, `version-list`, `version-save`, `version-set-active`, `restore`, `trash-list`, `promote`. `create --tier workspace` lands on PVC; `--tier company` writes in-repo (PR-driven). `fork` is the CLI analogue of GUI Customize. | `--action`, `--id`, `--workspace`, `--tier`, `--parent`, `--new-id`, `--name`, `--description`, `--vault-refs`, `--body`, `--version`, `--note` |
 | **`hive`** | Cross-workspace messaging. Verbs: `publish`, `read`, `poll-mentions`. Default topic `hivemind/feed`. | `--workspace`, `--topic`, `--payload`, `--limit`, `--since`, `--mark-seen` |
-| **`session`** | Inspect / manage pi_direct sessions. Verbs: `list`, `show`, `delete`, `reset`. Answers "what did Bob do today?". Backed by `lib.session_manager`. | `--workspace`, `--state running\|paused\|completed\|errored` (list); `<session-id>` (show/delete/reset) |
+| **`chat`** | Talk to a workspace's chatbot. Verbs: `send`, `commands`, `history`. Each workspace has its own persona (`vars.chatbot`), model (`chat_model`), session namespace, and Iris memory. CLI-created sessions appear in the GUI chat tab automatically (same Redis namespace). See the "Chat" section below for recipes. | `--workspace`, `--message`, `--session`, `--json` |
+| **`session`** | Inspect / manage pi_direct + chat sessions (same Redis namespace). Verbs: `list`, `show`, `delete`, `reset`. Answers "what did Bob do today?". Backed by `lib.session_manager`. | `--workspace`, `--state running\|paused\|completed\|errored` (list); `<session-id>` (show/delete/reset) |
 | **`trace`** | Query/assert against Jaeger. `get <id>` prints span tree + tags; `assert` exits 0 when all `--has-span`/`--has-attr` hold. | `--trace-id`, `--has-span`, `--has-attr`, `--workspace` |
 | **`audit verify`** | Validate HMAC chain via `AuditLog.validate()`. | `--workspace` |
 | **`memory forget`** | Hard-delete chat-agent long-term memories (Redis Iris). | `--workspace`, `--all`, `--id` |
@@ -130,11 +131,66 @@ The 2 newest verbs — company-tier visibility + soft-revoke (shipped 2026-05-28
 
 The `policy set` write path re-resolves with the candidate in memory before writing to disk. If the simulated resolve produces a rejection for the same field, the write is refused — so `set` never persists a value that would have been rejected at enforcement time.
 
-The cascade is 3-tier (company -> repo -> workspace). Every field belongs to ONE of 4 mutability classes:
-- `compliance` — company-only; lower tiers rejected at write AND resolve time
-- `identity` — workspace can pin, hard-reset to override
-- `operational` — last-writer-wins; company can overwrite anytime
-- `collection` — vars / secrets / skills. Split-by-kind: vars soft-override unless locked or revoked; skills ADD only (collision REJECTED); secret declarations cascade per tier with values namespaced. `intersection_only` fields (`budget.*`, `quota.*`, `allowed_services`) can only NARROW, never widen.
+The cascade is 3-tier (company -> repo -> workspace). Every field belongs to ONE of 4 mutability classes: `compliance` (company-only, lower tiers rejected), `identity` (workspace can pin), `operational` (last-writer-wins), `collection` (vars/secrets/skills, split-by-kind). `intersection_only` fields (`budget.*`, `quota.*`, `allowed_services`) can only NARROW, never widen.
+
+## Chat — per-workspace chatbot
+
+Each workspace has its OWN chatbot. The persona comes from `vars.chatbot` (falls back to `vars.system_prompt`), the model from `chat_model` (decoupled from the workflow-driving `model`), sessions live under workspace-prefixed Redis keys (`sess-<workspace>-<id>`), and long-term memory namespaces are per workspace (Redis Iris, D-032). Slash messages (`/help`, `/skills`, `/clear`) short-circuit before the LLM in the `chat_send` handler — they don't consume tokens or LLM quota.
+
+**GUI continuity:** sessions are stored under workspace-prefixed Redis keys keyed only by `session_id`. Anything written through `chat_send` from EITHER the CLI or the GUI shows up in `agent session list --workspace <ws>` and in the GUI chat tab's session sidebar without further work. Copy the `session_id` from CLI output and paste it into the GUI to resume the same conversation.
+
+```powershell
+# One-shot — mints a new session, prints session_id + reply
+.\bin\agent-cli.ps1 chat send --workspace workspace-alice --message "who are you?"
+
+# Resume the same conversation in another turn (paste the session_id from the previous send)
+.\bin\agent-cli.ps1 chat send --workspace workspace-alice --message "continue please" `
+    --session sess-alice-1723bda1398a
+
+# Slash command — no LLM call, no quota consumed
+.\bin\agent-cli.ps1 chat send --workspace workspace-alice --message "/skills"
+
+# List all slash commands the chat surface supports
+.\bin\agent-cli.ps1 chat commands --workspace workspace-alice
+
+# Replay an existing session as a USER / ASSISTANT transcript
+.\bin\agent-cli.ps1 chat history --workspace workspace-alice --session sess-alice-1723bda1398a
+```
+
+`chat history` reuses `scripts/session_admin show` (the same code path that backs `agent session show` and the GUI chat tab). Reformats the output as chat turns instead of an ops-style record. Vision-routing content blocks (`[{type:'text',text:'...'}, ...]`) are flattened.
+
+## Prompt templates + Smart Expand (D-038)
+
+Prompt templates are cascade-backed (`config/policy.yaml companies.LOS.prompt_templates`). Every workspace inherits 8 company-tier locked templates automatically. Workspace-tier overrides are stored in the workspace PVC (`policy.override.yaml`) and are fully isolated — changing alice's template never affects bob.
+
+```powershell
+# List all effective prompt templates for a workspace
+.\bin\agent-cli.ps1 dispatch --workspace workspace-alice --op prompt_template_list --params '{}'
+
+# Get one template (full body + config)
+.\bin\agent-cli.ps1 dispatch --workspace workspace-alice --op prompt_template_get `
+    --params '{"id":"usg-smart-expand"}'
+
+# Override a template body at workspace tier (locked=true only blocks delete, not override)
+.\bin\agent-cli.ps1 dispatch --workspace workspace-alice --op prompt_template_set `
+    --params '{"id":"usg-smart-expand","body":"Custom body with {{SCHEMA}}","closing":""}'
+
+# Reset to company default: delete the workspace override (cascade falls back to company)
+.\bin\agent-cli.ps1 dispatch --workspace workspace-alice --op prompt_template_delete `
+    --params '{"id":"usg-smart-expand"}'
+
+# Server-side expand: resolve template + substitute context + call LLM
+# This is what the GUI Smart Expand button calls (no clipboard needed)
+.\bin\agent-cli.ps1 dispatch --workspace workspace-alice --op prompt_expand `
+    --params '{"template_id":"usg-smart-expand","context":{"SCHEMA":"...","CURRENT_WORKSPACE_JSON":"..."}}'
+```
+
+**Model for expand:** reads `vars.expand_model` → `chat_model` → `model`. Override per workspace:
+```powershell
+.\bin\agent-cli.ps1 vars set --workspace workspace-alice --key expand_model --value deepseek-chat
+```
+
+`agent prompt {list,show,set,delete}` typed verbs are on the growth list (CLI_CONTRACT). Until they ship, use `agent dispatch` above.
 
 ## Workspace operations (`ws`)
 
@@ -320,11 +376,11 @@ For the canonical Alice-Dev.to demo flow, see `tests/alice_backend_baseline.py` 
 
 **`policy show` redacts vault-sourced var values to `***`.** A var whose value came from a `vault://` reference returns `***` and is flagged in `vars_vault_resolved` (boolean map). Use `agent vars get --key <name>` if you legitimately need the resolved value for a single var — that path is policy-gated. Pre-fix exposure (before 2026-05-28): `policy show --workspace workspace-company` printed full PATs + xoxb tokens.
 
-**Cross-service `signature_invalid` after a deploy** — when the HMAC signing surface changes on the server side, there's a 1-2 minute drift window where one service is on the new version. Transient — retry. If persistent, the cluster admin needs to coordinate the rollout.
+**Cross-service `signature_invalid` after a deploy** — when `lib/auth.py` changes, both `web-ui` and `dispatch-http` rebuild via auto-deploy. There's a 1-2 minute drift window where one side is on the new HMAC version. See your cluster admin §HMAC auth protocol for the freeze/unfreeze recipe.
 
 ## When NOT to use the wrapper
 
-The wrapper is for `agent <subcommand>` invocations only. For anything else (raw `kubectl`, bare SSH, Jaeger UI deep-dives, dashboard issues), use the standard tool directly against the cluster — you'll need the SSH key + cluster admin access for those.
+The wrapper is for `agent <subcommand>` invocations only. For anything else (raw `kubectl`, bare SSH, Jaeger UI deep-dives, dashboard issues), use the standard tool directly against the cluster -- you'll need the SSH key + cluster admin access for those.
 
 ## File map
 
@@ -338,3 +394,4 @@ bin/
 Both wrappers do exactly the same thing: serialize args as JSON, scp to Hetzner, run a tiny remote python that execs `kubectl exec -n platform deploy/agent -- env OPERATOR_NAME=… DISPATCH_URL=… /usr/local/bin/agent <args>`. Exit code and signals pass through.
 
 **How tracing surfacing works under the hood:** `lib/dispatch.py` writes `result["trace_id"]` on every dispatch envelope from inside the dispatch span. The Go CLI (`cmd/agent/cmd/dispatch.go` + `cmd/agent/cmd/common.go:BuildDispatchScript`) emits `[TRACE] <id>` on stderr when the result carries one. The wrapper filters that line, formats as a Jaeger URL, and optionally appends to the sidecar.
+
