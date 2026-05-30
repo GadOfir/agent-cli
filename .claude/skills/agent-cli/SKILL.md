@@ -1,6 +1,6 @@
 ---
 name: agent-cli
-description: Run the in-cluster `agent` Go binary from this PC via local wrappers `bin/agent-cli.ps1` (PowerShell) and `bin/agent-cli.sh` (bash). Covers all 17 top-level verbs — audit, cluster, dispatch, hive, memory, migrate, policy, provision, secret, service, session, skill, test, trace, vars, workflow, ws. Auth + operator identity + dispatch URL are baked in. Use when the user says "run agent X", "drive a flow", "publish to hive", "list/show/set/clear/trace/lock/unlock/inventory/revoke policy", "set a workspace var or secret", "dispatch any op", or any operation that maps to an `agent <subcommand>` invocation against PROD.
+description: Run the in-cluster `agent` Go binary from this PC via local wrappers `bin/agent-cli.ps1` (PowerShell) and `bin/agent-cli.sh` (bash). Covers all 19 top-level verbs — audit, chat, cluster, dispatch, hive, memory, migrate, policy, provision, scan, secret, service, session, skill, test, trace, vars, workflow, ws. Auth + operator identity + dispatch URL are baked in. Use when the user says "run agent X", "chat with a workspace", "scan a prompt / Prompt Guard", "drive a flow", "publish to hive", "list/show/set/clear/trace/lock/unlock/inventory/revoke policy", "set a workspace var or secret", "dispatch any op", or any operation that maps to an `agent <subcommand>` invocation against PROD.
 argument-hint: "<subcommand> [flags]  — e.g. 'workflow run alice-e2e --workspace workspace-alice', 'policy inventory --workspace workspace-company --kind vars', 'hive read --workspace workspace-bob --topic hivemind/feed'"
 ---
 
@@ -31,7 +31,7 @@ Defaults match PROD:
 
 Verify with `.\bin\agent-cli.ps1 config`.
 
-## Subcommand reference — 17 top-level verbs
+## Subcommand reference — 19 top-level verbs
 
 Run `<wrapper> <subcommand> --help` for real flags. Bold = most useful in the demo.
 
@@ -45,6 +45,7 @@ Run `<wrapper> <subcommand> --help` for real flags. Bold = most useful in the de
 | **`skill`** | Inspect/manage skill registry + versions. Actions: `list`, `show`, `activate` (defaults `--dry-run`), `create`, `fork`, `delete`, `version-list`, `version-save`, `version-set-active`, `restore`, `trash-list`, `promote`. `create --tier workspace` lands on PVC; `--tier company` writes in-repo (PR-driven). `fork` is the CLI analogue of GUI Customize. | `--action`, `--id`, `--workspace`, `--tier`, `--parent`, `--new-id`, `--name`, `--description`, `--vault-refs`, `--body`, `--version`, `--note` |
 | **`hive`** | Cross-workspace messaging. Verbs: `publish`, `read`, `poll-mentions`. Default topic `hivemind/feed`. | `--workspace`, `--topic`, `--payload`, `--limit`, `--since`, `--mark-seen` |
 | **`chat`** | Talk to a workspace's chatbot. Verbs: `send`, `commands`, `history`. Each workspace has its own persona (`vars.chatbot`), model (`chat_model`), session namespace, and Iris memory. CLI-created sessions appear in the GUI chat tab automatically (same Redis namespace). See the "Chat" section below for recipes. | `--workspace`, `--message`, `--session`, `--json` |
+| **`scan`** | Prompt-injection scanning + scan-pattern registry (Prompt Guard — the CLI peer of the GUI Prompt Guard view). Verbs: `run` (regex-scan a prompt, observe-only), `verify` (on-demand LLM judge, advisory), `list` (recent injection-scan events = the timeline), `pattern {list\|add\|delete}` (workspace scan families — baked families can't be deleted, regex validated server-side). | `--workspace`, `--prompt`, `--id` |
 | **`session`** | Inspect / manage pi_direct + chat sessions (same Redis namespace). Verbs: `list`, `show`, `delete`, `reset`. Answers "what did Bob do today?". Backed by `lib.session_manager`. | `--workspace`, `--state running\|paused\|completed\|errored` (list); `<session-id>` (show/delete/reset) |
 | **`trace`** | Query/assert against Jaeger. `get <id>` prints span tree + tags; `assert` exits 0 when all `--has-span`/`--has-attr` hold. | `--trace-id`, `--has-span`, `--has-attr`, `--workspace` |
 | **`audit verify`** | Validate HMAC chain via `AuditLog.validate()`. | `--workspace` |
@@ -374,7 +375,7 @@ For the canonical Alice-Dev.to demo flow, see `tests/alice_backend_baseline.py` 
 
 **`migrate verify-los-empty` exits 1 in the CURRENT state.** This is by design — LOS still carries LinkedIn/Slack/Memory secret declarations + values (per `config/policy.yaml`). The probe is a migration completion check; it stays red until those declarations move to per-workspace tiers. Don't treat as a regression.
 
-**`policy show` redacts vault-sourced var values to `***`.** A var whose value came from a `vault://` reference returns `***` and is flagged in `vars_vault_resolved` (boolean map). Use `agent vars get --key <name>` if you legitimately need the resolved value for a single var — that path is policy-gated. Pre-fix exposure (before 2026-05-28): `policy show --workspace workspace-company` printed full PATs + xoxb tokens.
+**`policy show` redacts vault-sourced var values to `***`.** A var whose value came from a `vault://` reference returns `***` and is flagged in `vars_vault_resolved` (boolean map). Use `agent vars get --key <name>` if you legitimately need the resolved value for a single var — that path is policy-gated.
 
 **Cross-service `signature_invalid` after a deploy** — when `lib/auth.py` changes, both `web-ui` and `dispatch-http` rebuild via auto-deploy. There's a 1-2 minute drift window where one side is on the new HMAC version. See your cluster admin §HMAC auth protocol for the freeze/unfreeze recipe.
 
