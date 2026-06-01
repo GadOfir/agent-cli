@@ -1,6 +1,6 @@
 ---
 name: agent-cli
-description: Run the in-cluster `agent` Go binary from this PC via local wrappers `bin/agent-cli.ps1` (PowerShell) and `bin/agent-cli.sh` (bash). Covers all 19 top-level verbs — audit, chat, cluster, dispatch, hive, memory, migrate, policy, provision, scan, secret, service, session, skill, test, trace, vars, workflow, ws. Auth + operator identity + dispatch URL are baked in. Use when the user says "run agent X", "chat with a workspace", "scan a prompt / Prompt Guard", "drive a flow", "publish to hive", "list/show/set/clear/trace/lock/unlock/inventory/revoke policy", "set a workspace var or secret", "dispatch any op", or any operation that maps to an `agent <subcommand>` invocation against PROD.
+description: Run the in-cluster `agent` Go binary from this PC via local wrappers `bin/agent-cli.ps1` (PowerShell) and `bin/agent-cli.sh` (bash). Covers all 20 top-level verbs — audit, chat, cluster, dispatch, hive, memory, migrate, policy, provision, repo, scan, secret, service, session, skill, test, trace, vars, workflow, ws. Auth + operator identity + dispatch URL are baked in. Use when the user says "run agent X", "chat with a workspace", "scan a prompt / Prompt Guard", "drive a flow", "publish to hive", "list/show/set/clear/trace/lock/unlock/inventory/revoke policy", "set a workspace var or secret", "dispatch any op", or any operation that maps to an `agent <subcommand>` invocation against PROD.
 argument-hint: "<subcommand> [flags]  — e.g. 'workflow run alice-e2e --workspace workspace-alice', 'policy inventory --workspace workspace-company --kind vars', 'hive read --workspace workspace-bob --topic hivemind/feed'"
 ---
 
@@ -31,7 +31,7 @@ Defaults match PROD:
 
 Verify with `.\bin\agent-cli.ps1 config`.
 
-## Subcommand reference — 19 top-level verbs
+## Subcommand reference — 20 top-level verbs
 
 Run `<wrapper> <subcommand> --help` for real flags. Bold = most useful in the demo.
 
@@ -56,6 +56,7 @@ Run `<wrapper> <subcommand> --help` for real flags. Bold = most useful in the de
 | **`test run`** | Run a cluster test suite by name. | `--suite`, `--workspace` |
 | **`migrate verify-los-empty`** | Verify legacy company/LOS secret declarations + values are empty. | `--workspace` |
 | **`ws ...`** | Workspace operations. Sub-verbs: `bootstrap-cert`, `claude`, `commit-policy`, `create`, `delete`, `duplicate`, `exec`, `promote-policy`, `run`, `set-primary`, `shell`, `skill`. See "Workspace operations" below. | see per-verb help |
+| **`repo register`** | Register a customer/external repo in the registry (`repos.<id>` + `github_token` declaration). **Build-free** — writes the PVC runtime overlay (G-139), no git commit, resolves on next dispatch. Derives the id from the URL. | `--url` (required), `--id`, `--company` |
 
 Bash is identical — swap the prefix: `./bin/agent-cli.sh hive read --workspace ...`.
 
@@ -192,6 +193,45 @@ Prompt templates are cascade-backed (`config/policy.yaml companies.LOS.prompt_te
 ```
 
 `agent prompt {list,show,set,delete}` typed verbs are on the growth list (CLI_CONTRACT). Until they ship, use `agent dispatch` above.
+
+## Customer onboarding (D-048) — a workflow, not a verb
+
+A customer IS a workspace. Onboarding is the `customer-onboard` **DAG workflow**
+(deterministic dispatch nodes + a `pi` summary), run under `workspace-company`.
+The token + extra profile are CLI follow-ups (the token must never flow through
+workflow inputs). Every step is build-free (G-139).
+
+```powershell
+# 1. Store the customer's repo token in vault (secret inject; age-encrypted,
+#    runtime-injected). NEVER inline — env/1Password ref. repo_id derives from the URL.
+$env:TOK = (op read "op://vault/<customer>-github/token")
+.\bin\agent-cli.ps1 secret set --workspace workspace-<name> --repo <repo_id> `
+    --key github_token --value $env:TOK --service github
+
+# 2. Run the onboarding workflow (registers repo → creates workspace attached →
+#    sets profile.name → LLM summary). repo_id is derived from the URL.
+.\bin\agent-cli.ps1 workflow run customer-onboard --workspace workspace-company `
+    --input name=<name> --input repo=https://github.com/<owner>/<repo>.git
+
+# 3. Extra profile fields (optional — cascade default is empty)
+.\bin\agent-cli.ps1 policy set --workspace workspace-<name> --field profile.contact --value "..."
+.\bin\agent-cli.ps1 policy set --workspace workspace-<name> --field profile.branding.facebook_url --value "..."
+
+# 4. Second workspace for the same customer = duplicate (inherits the repo cert)
+.\bin\agent-cli.ps1 ws duplicate --from workspace-<name> --workspace workspace-<name>-dev
+```
+
+Services / skills / tools **cascade from `workspace-company` by default**; customize
+per customer with the existing verbs (`ws skill --action add/remove`,
+`agent tool allow/deny`, narrow `allowed_services` via `policy set`). To register a
+repo on its own (outside the workflow): `agent repo register --url <git-url>`.
+Full contract: `docs/contracts/CUSTOMER_ONBOARDING_CONTRACT.md`.
+
+> **NO CLI/dispatch op triggers a build (G-139).** Runtime mutations land on PVC/vault;
+> the resolver overlays them on the git baseline. Git is the cold-start seed only,
+> written ONLY by the explicit promote verbs (`ws commit-policy`, `ws promote-policy`,
+> `skill promote`). If you add an op that writes `config/**` on the hot path, that's a
+> G-139-class trap — route it through the PVC overlay instead.
 
 ## Workspace operations (`ws`)
 
