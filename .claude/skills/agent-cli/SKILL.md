@@ -1,6 +1,6 @@
 ---
 name: agent-cli
-description: Run the in-cluster `agent` Go binary from this PC via local wrappers `bin/agent-cli.ps1` (PowerShell) and `bin/agent-cli.sh` (bash). Covers all 20 top-level verbs — audit, chat, cluster, dispatch, hive, memory, migrate, policy, provision, repo, scan, secret, service, session, skill, test, trace, vars, workflow, ws. Auth + operator identity + dispatch URL are baked in. Use when the user says "run agent X", "chat with a workspace", "scan a prompt / Prompt Guard", "drive a flow", "publish to hive", "list/show/set/clear/trace/lock/unlock/inventory/revoke policy", "set a workspace var or secret", "dispatch any op", or any operation that maps to an `agent <subcommand>` invocation against PROD.
+description: Run the in-cluster `agent` Go binary from this PC via local wrappers `bin/agent-cli.ps1` (PowerShell) and `bin/agent-cli.sh` (bash). Covers all 23 top-level verbs — audit, chat, cluster, dispatch, hive, llm, memory, migrate, policy, provision, repo, scan, secret, service, session, skill, test, ticket, tool, trace, vars, workflow, ws. Auth + operator identity + dispatch URL are baked in. Use when the user says "run agent X", "chat with a workspace", "scan a prompt / Prompt Guard", "drive a flow", "publish to hive", "list/show/set/clear/trace/lock/unlock/inventory/revoke policy", "set a workspace var or secret", "dispatch any op", or any operation that maps to an `agent <subcommand>` invocation against PROD.
 argument-hint: "<subcommand> [flags]  — e.g. 'workflow run alice-e2e --workspace workspace-alice', 'policy inventory --workspace workspace-company --kind vars', 'hive read --workspace workspace-bob --topic hivemind/feed'"
 ---
 
@@ -41,7 +41,10 @@ Run `<wrapper> <subcommand> --help` for real flags. Bold = most useful in the de
 | **`policy`** | All 8 verbs: `show`, `trace`, `set`, `clear`, `lock`, `unlock`, `inventory`, `revoke`. See the "Policy cascade" section below for recipes. | `--workspace`, `--field`, `--value`, `--kind`, `--key`, `--target-tier`, `--target-id`, `--reason`, `--json` |
 | **`vars`** | Manage workspace-tier vars (PVC-backed). Verbs: `set`, `get`, `list`, `delete`. Key vars: `system_prompt`, `chatbot` (chat persona), `expand_model` (Smart Expand LLM, e.g. `deepseek-chat`). | `--workspace`, `--key`, `--value`, `--type {text\|secret}` |
 | **`secret`** | Manage age-encrypted secrets. Verbs: `set`, `get-meta` (value NEVER returned), `list`, `delete`. | `--workspace`, `--repo`, `--key`, `--value`, `--service` |
-| **`workflow`** | Full DAG lifecycle. Verbs: `list`, `create`, `edit`, `duplicate`, `delete`, `run`, `validate`, `export`, `import`, `status`, `logs`, `cancel`, `approve`, `reject`, `resume`, `build`, `schedule {list\|enable\|disable}`. Per-workspace user pack when `--workspace` is set; global base pack otherwise. GUI Flows tab is a 1:1 view. | `--workspace`, `--id`, `--input`, `--worktree`, `--session`, `--resume`, `--reset-session` |
+| **`ticket`** | Internal ticket operations (D-054/D-057). Verbs: `list`, `show`, `create`, `comment`, `status` (change status), `assign`, `handoff`, `link`, `claim`, `release`. **D-057 auto-link:** `workflow run --ticket <TCK>` auto-links the run + workflow definition to that ticket; `create_task` payload `ticket_id` auto-links a vibekanban job. Both best-effort (link failure never fails the run/job). | `--workspace`, `--ticket_id`, `--link-type`, `--target`, `--limit`, `--offset`, `--tag`, `--ticket` (on `workflow run`) |
+| **`tool`** | Manage per-workspace tools (D-046). Verbs: `list`, `add`, `remove`, `allow`, `deny`, `undeny`. `deny`/`undeny` are company-tier only (`--workspace workspace-company`). | `--workspace`, `--name`, `--kind`, `--source`, `--version`, `--target` |
+| **`llm bench`** | Benchmark LLM speed/cost from production Jaeger traces (`llm.call` spans, aggregated by model). `llm` is the parent command. | `--workspace`, `--model`, `--days`, `--limit`, `--sort` |
+| **`workflow`** | Full DAG lifecycle. Verbs: `list`, `create`, `edit`, `duplicate`, `delete`, `run`, `validate`, `export`, `import`, `status`, `logs`, `cancel`, `approve`, `reject`, `resume`, `build`, `schedule {list\|enable\|disable}`. Per-workspace user pack when `--workspace` is set; global base pack otherwise. `run --ticket <TCK>` auto-links a jira (D-057). | `--workspace`, `--id`, `--input`, `--worktree`, `--session`, `--resume`, `--reset-session`, `--ticket` |
 | **`skill`** | Inspect/manage skill registry + versions. Actions: `list`, `show`, `activate` (defaults `--dry-run`), `create`, `fork`, `delete`, `version-list`, `version-save`, `version-set-active`, `restore`, `trash-list`, `promote`. `create --tier workspace` lands on PVC; `--tier company` writes in-repo (PR-driven). `fork` is the CLI analogue of GUI Customize. | `--action`, `--id`, `--workspace`, `--tier`, `--parent`, `--new-id`, `--name`, `--description`, `--vault-refs`, `--body`, `--version`, `--note` |
 | **`hive`** | Cross-workspace messaging. Verbs: `publish`, `read`, `poll-mentions`. Default topic `hivemind/feed`. | `--workspace`, `--topic`, `--payload`, `--limit`, `--since`, `--mark-seen` |
 | **`chat`** | Talk to a workspace's chatbot. Verbs: `send`, `commands`, `history`. Each workspace has its own persona (`vars.chatbot`), model (`chat_model`), session namespace, and Iris memory. CLI-created sessions appear in the GUI chat tab automatically (same Redis namespace). See the "Chat" section below for recipes. | `--workspace`, `--message`, `--session`, `--json` |
@@ -57,6 +60,31 @@ Run `<wrapper> <subcommand> --help` for real flags. Bold = most useful in the de
 | **`migrate verify-los-empty`** | Verify legacy company/LOS secret declarations + values are empty. | `--workspace` |
 | **`ws ...`** | Workspace operations. Sub-verbs: `bootstrap-cert`, `claude`, `commit-policy`, `create`, `delete`, `duplicate`, `exec`, `promote-policy`, `run`, `set-primary`, `shell`, `skill`. See "Workspace operations" below. | see per-verb help |
 | **`repo register`** | Register a customer/external repo in the registry (`repos.<id>` + `github_token` declaration). **Build-free** — writes the PVC runtime overlay (G-139), no git commit, resolves on next dispatch. Derives the id from the URL. | `--url` (required), `--id`, `--company` |
+
+
+## Doctor + Probe — preflight and smoke test for the CLI path
+
+Two operator-side scripts in `bin/` validate the whole CLI path BEFORE a long-running
+dispatch call hangs (the #1 failure mode: SSH to the cluster is fine but the agent pod
+is not Running, so `kubectl exec` blocks silently for 90s).
+
+```bash
+# DOCTOR — preflight (2–10s). Checks every hop the wrapper depends on:
+#   ssh key, operator registry, ssh reachable, agent pod Running, dispatch-http pod Running, agent binary --help.
+bash bin/agent-cli-doctor.sh      # linux/wsl
+# Expected: 6/6 pass
+
+# PROBE — all-verb smoke (15–30s). Runs `agent <verb> --help` for every top-level verb
+# + key sub-trees (ticket, tool, ws, llm, audit, workflow build). No dispatch, no LLM,
+# no state mutation. Validates the Cobra wire-up after any cmd/agent/cmd/ reorg.
+bash bin/agent-cli-probe.sh       # linux/wsl
+# Expected: 54/54 pass (23 top-level + 31 sub-verbs)
+```
+
+Both use the same SSH defaults/env overrides as the `agent-cli.sh` wrapper. The doctor
+stops fast on SSH breakage (bounded timeouts, ~2s verdict) instead of blocking for
+minutes like `kubectl exec` on a missing pod. **Run the doctor** before reporting a
+CLI hang, and **run the probe** after adding or renaming a Cobra command.
 
 Bash is identical — swap the prefix: `./bin/agent-cli.sh hive read --workspace ...`.
 
@@ -341,6 +369,37 @@ Open any captured trace_id in the Jaeger UI: `https://tools.be-mcp.com/jaeger/tr
 
 ## Session context-survival + admin
 
+
+## Tickets (D-054/D-057) — internal jira-like work tracking
+
+```powershell
+# List open tickets for a workspace
+.\bin\agent-cli.ps1 ticket list --workspace workspace-alice
+
+# Show one with full history + links
+.\bin\agent-cli.ps1 ticket show TCK-000004 --workspace workspace-alice
+
+# Create a ticket
+.\bin\agent-cli.ps1 ticket create --workspace workspace-alice --title "Investigate timeout" --description "…" --tag bug,investigate
+
+# Change status + comment
+.\bin\agent-cli.ps1 ticket status TCK-000004 --workspace workspace-alice --status in_progress
+.\bin\agent-cli.ps1 ticket comment TCK-000004 --workspace workspace-alice --body "looking into this"
+
+# Claim a ticket (30m TTL lease — auto-released on expiry)
+.\bin\agent-cli.ps1 ticket claim TCK-000004 --workspace workspace-alice
+.\bin\agent-cli.ps1 ticket release TCK-000004 --workspace workspace-alice
+
+# Link to a workflow run or vibekanban job (manual: optional — auto-link is D-057)
+.\bin\agent-cli.ps1 ticket link TCK-000004 --link-type workflow_run --target <run_id> --workspace workspace-alice
+.\bin\agent-cli.ps1 ticket link TCK-000004 --link-type vibekanban_task --target <job_id> --workspace workspace-alice
+
+# D-057 auto-link: run a workflow under a ticket — links are automatic
+.\bin\agent-cli.ps1 workflow run smoke-dag --workspace workspace-alice --ticket TCK-000004
+# Verify the links landed:
+.\bin\agent-cli.ps1 ticket show TCK-000004 --workspace workspace-alice
+```
+
 Every `llm.call` carries `session.context_source` ∈ {`fresh`, `attached:<sid>`, `resumed:<sid>`, `reset:<sid>`}, plus `session.context_carries` and `session.previous_turn_count`. Three flags on `ws run` and `workflow run` control session reuse:
 
 ```powershell
@@ -430,9 +489,11 @@ bin/
   agent-cli.ps1          PowerShell wrapper (Windows)
   agent-cli.sh           bash wrapper (mac/linux/wsl)
   agent-cli.env.example  config template (copy to agent-cli.env, gitignored)
+  agent-cli-doctor.sh    preflight: validate SSH + pod + binary before any long dispatch
+  agent-cli-probe.sh     smoke: `agent <verb> --help` for all 54 verb/variants (PROD only)
 ```
 
 Both wrappers do exactly the same thing: serialize args as JSON, scp to Hetzner, run a tiny remote python that execs `kubectl exec -n platform deploy/agent -- env OPERATOR_NAME=… DISPATCH_URL=… /usr/local/bin/agent <args>`. Exit code and signals pass through.
-
+The doctor and probe use the same SSH defaults + env overrides; they work from WSL (copy key to `/tmp` for correct permissions) and Linux.
 **How tracing surfacing works under the hood:** `lib/dispatch.py` writes `result["trace_id"]` on every dispatch envelope from inside the dispatch span. The Go CLI (`cmd/agent/cmd/dispatch.go` + `cmd/agent/cmd/common.go:BuildDispatchScript`) emits `[TRACE] <id>` on stderr when the result carries one. The wrapper filters that line, formats as a Jaeger URL, and optionally appends to the sidecar.
 
