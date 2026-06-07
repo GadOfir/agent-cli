@@ -41,7 +41,7 @@ Run `<wrapper> <subcommand> --help` for real flags. Bold = most useful in the de
 | **`policy`** | All 8 verbs: `show`, `trace`, `set`, `clear`, `lock`, `unlock`, `inventory`, `revoke`. See the "Policy cascade" section below for recipes. | `--workspace`, `--field`, `--value`, `--kind`, `--key`, `--target-tier`, `--target-id`, `--reason`, `--json` |
 | **`vars`** | Manage workspace-tier vars (PVC-backed). Verbs: `set`, `get`, `list`, `delete`. Key vars: `system_prompt`, `chatbot` (chat persona), `expand_model` (Smart Expand LLM, e.g. `deepseek-chat`). | `--workspace`, `--key`, `--value`, `--type {text\|secret}` |
 | **`secret`** | Manage age-encrypted secrets. Verbs: `set`, `get-meta` (value NEVER returned), `list`, `delete`. | `--workspace`, `--repo`, `--key`, `--value`, `--service` |
-| **`ticket`** | Internal ticket operations (D-054/D-057). Verbs: `list`, `show`, `create`, `comment`, `status` (change status), `assign`, `handoff`, `link`, `claim`, `release`. **D-057 auto-link:** `workflow run --ticket <TCK>` auto-links the run + workflow definition to that ticket; `create_task` payload `ticket_id` auto-links a vibekanban job. Both best-effort (link failure never fails the run/job). | `--workspace`, `--ticket_id`, `--link-type`, `--target`, `--limit`, `--offset`, `--tag`, `--ticket` (on `workflow run`) |
+| **`ticket`** | Internal ticket operations (D-054/D-057). Verbs: `list`, `show`, `create`, `comment`, `status` (change status), `assign`, `handoff`, `link`, `claim`, `release`. **D-057 auto-link:** `workflow run --ticket <TCK>` auto-links the run + workflow definition to that ticket; `create_task` payload `ticket_id` auto-links a vibekanban job. Both best-effort (link failure never fails the run/job). | `--workspace`, `--json`; list filters `--mine`/`--status`/`--tag`; `--link-type`/`--target` (link); `--ticket` (on `workflow run`). **No `--limit`/`--offset`; `create` has no `--tag`.** |
 | **`tool`** | Manage per-workspace tools (D-046). Verbs: `list`, `add`, `remove`, `allow`, `deny`, `undeny`. `deny`/`undeny` are company-tier only (`--workspace workspace-company`). | `--workspace`, `--name`, `--kind`, `--source`, `--version`, `--target` |
 | **`llm bench`** | Benchmark LLM speed/cost from production Jaeger traces (`llm.call` spans, aggregated by model). `llm` is the parent command. | `--workspace`, `--model`, `--days`, `--limit`, `--sort` |
 | **`workflow`** | Full DAG lifecycle. Verbs: `list`, `create`, `edit`, `duplicate`, `delete`, `run`, `validate`, `export`, `import`, `status`, `logs`, `cancel`, `approve`, `reject`, `resume`, `build`, `schedule {list\|enable\|disable}`. Per-workspace user pack when `--workspace` is set; global base pack otherwise. `run --ticket <TCK>` auto-links a jira (D-057). | `--workspace`, `--id`, `--input`, `--worktree`, `--session`, `--resume`, `--reset-session`, `--ticket` |
@@ -50,7 +50,7 @@ Run `<wrapper> <subcommand> --help` for real flags. Bold = most useful in the de
 | **`chat`** | Talk to a workspace's chatbot. Verbs: `send`, `commands`, `history`. Each workspace has its own persona (`vars.chatbot`), model (`chat_model`), session namespace, and Iris memory. CLI-created sessions appear in the GUI chat tab automatically (same Redis namespace). See the "Chat" section below for recipes. | `--workspace`, `--message`, `--session`, `--json` |
 | **`scan`** | Prompt-injection scanning + scan-pattern registry (Prompt Guard — the CLI peer of the GUI Prompt Guard view). Verbs: `run` (regex-scan a prompt, observe-only), `verify` (on-demand LLM judge, advisory), `list` (recent injection-scan events = the timeline), `pattern {list\|add\|delete}` (workspace scan families — baked families can't be deleted, regex validated server-side). | `--workspace`, `--prompt`, `--id` |
 | **`session`** | Inspect / manage pi_direct + chat sessions (same Redis namespace). Verbs: `list`, `show`, `delete`, `reset`. Answers "what did Bob do today?". Backed by `lib.session_manager`. | `--workspace`, `--state running\|paused\|completed\|errored` (list); `<session-id>` (show/delete/reset) |
-| **`trace`** | Query/assert against Jaeger. `get <id>` prints span tree + tags; `assert` exits 0 when all `--has-span`/`--has-attr` hold. | `--trace-id`, `--has-span`, `--has-attr`, `--workspace` |
+| **`trace`** | Query/assert + **live control**. `get <id>` prints span tree; `assert` exits 0 when all `--has-span`/`--has-attr` hold. **`enable`/`disable`/`level <story\|eng\|infra>`/`status`** flip tracing on/off + verbosity **with no pod restart** (see "Tracing control" below). | `--trace-id`, `--has-span`, `--has-attr`, `--workspace` |
 | **`audit verify`** | Validate HMAC chain via `AuditLog.validate()`. | `--workspace` |
 | **`memory forget`** | Hard-delete chat-agent long-term memories (Redis Iris). | `--workspace`, `--all`, `--id` |
 | **`service`** | Inspect service definitions. **Uses `--action`, NOT a positional verb.** | `--action {list\|show\|validate}`, `--id <service>`, `--workspace` |
@@ -308,7 +308,23 @@ Full contract: `docs/contracts/CUSTOMER_ONBOARDING_CONTRACT.md`.
 
 A workspace can use a skill via: (1) **membership** — `ws skill --action add` writes `workspaces.<ws>.overrides.skills` in policy. Gates *availability* but doesn't activate. (2) **Pre-activation before turn 0** — `ws run --skills slack,github` or `requires_skills:` / `skills:` in the workflow YAML. Pi-direct emits one `skill_activated` span before the first `llm.call`. (3) **LLM self-activation** — every workspace has the `activate_skill` tool by default; the LLM calls `activate_skill(skill_id="...")` mid-flow. Vault tokens NEVER enter the LLM message context — `vault_refs` resolve at HTTP request time inside `ext.call`. If the LLM tries to activate a skill the workspace lacks membership for, dispatch refuses with `error_class=policy_rejection`.
 
+## Tracing control (live on/off + level — no pod restart)
+
+Tracing is **OFF by default in prod** (it adds ≈3-9s/dispatch at infra level — the Cloudflare 504 cause). The master on/off and the level are now a **live redis flag the span sampler reads**, so you flip them from the CLI and every process (`agent` + `dispatch-http`) picks it up within ~5s — **no restart**. `Trace: (none)` on every call means tracing is OFF; enable it first.
+
+```powershell
+.\bin\agent-cli.ps1 trace status                 # ON/OFF + level
+.\bin\agent-cli.ps1 trace enable                  # turn ON (live)
+.\bin\agent-cli.ps1 trace level story             # story|eng|infra (live)
+# ... run the flow you want to trace, grab the trace_id from Jaeger ...
+.\bin\agent-cli.ps1 trace disable                 # turn OFF when done
+```
+
+Levels (span volume / latency): **story** ≈10-20 spans (workflow + pi turns + llm.call) · **eng** ≈20-50 (+ dispatch/tools/ext/hive) · **infra** ≈50-150 (+ vault.* + policy_resolution). Use `story` for the lightest footprint; `infra` only for cascade/secret debugging. **Disable when finished** — leaving it on (esp. infra) reintroduces dispatch latency. The toggle is cluster-wide operator-plane; `--workspace` only fills the dispatch envelope (defaults `workspace-company`).
+
 ## Tracing — what to expect
+
+> Spans only appear when tracing is enabled (`agent trace enable`). With tracing OFF (prod default) every call prints `Trace: (none)` — that is expected, not a failure.
 
 Every wrapper invocation prints `Trace: <jaeger_url>` to **stderr** after the call. If no span was emitted, the wrapper prints `Trace: (none)` instead of silently dropping. Suppress with `AGENT_CLI_QUIET=1`.
 
@@ -373,14 +389,16 @@ Open any captured trace_id in the Jaeger UI: `https://tools.be-mcp.com/jaeger/tr
 ## Tickets (D-054/D-057) — internal jira-like work tracking
 
 ```powershell
-# List open tickets for a workspace
+# List open tickets for a workspace (filters: --mine, --status open,blocked, --tag bug)
 .\bin\agent-cli.ps1 ticket list --workspace workspace-alice
 
 # Show one with full history + links
 .\bin\agent-cli.ps1 ticket show TCK-000004 --workspace workspace-alice
 
-# Create a ticket
-.\bin\agent-cli.ps1 ticket create --workspace workspace-alice --title "Investigate timeout" --description "…" --tag bug,investigate
+# Create a ticket (NOTE: typed `ticket create` has NO --tag; pass tags via dispatch)
+.\bin\agent-cli.ps1 ticket create --workspace workspace-alice --title "Investigate timeout" --description "…"
+# With tags: route through dispatch (params accept tags[])
+.\bin\agent-cli.ps1 dispatch --workspace workspace-alice --op ticket_create --params '{"title":"Investigate timeout","description":"…","tags":["bug","investigate"]}'
 
 # Change status + comment
 .\bin\agent-cli.ps1 ticket status TCK-000004 --workspace workspace-alice --status in_progress
@@ -467,6 +485,12 @@ For the canonical Alice-Dev.to demo flow, see `tests/alice_backend_baseline.py` 
 **`workflow` writes to per-workspace user pack only when `--workspace` is set.** Bare `agent workflow create my-flow` lands in the GLOBAL base pack (admin mode). To match GUI scope, always pass `--workspace <ws>`. `workflow list` tags each with `scope: base|user`.
 
 **`workflow list` shows RUNS, not workflow definitions.** Column header reads `WORKFLOW` but each row is a `RUN_ID`. To list available workflow IDs, use `workflow schedule list` or `workflow export <id>`.
+
+**`workflow run --input` takes ONE JSON object, not `k=v` pairs.** The flag is parsed with `json.Unmarshal`, so use `--input '{"start_url":"https://x","max_pages":2}'`. The `--input name=foo --input repo=bar` form does NOT work (last value wins, and it isn't valid JSON).
+
+**`ws exec -- <cmd>` can't pass dash-flags to the inner command.** Cobra parses any `-x` after `--` as its own flag (`bash -c`, `bash -lc`, `find -type` all fail with "unknown flag"). Workarounds: run dash-free commands (`ls <path>`), or use raw `kubectl exec` via the `cluster`/`hetzner-ssh` skill for anything needing flags.
+
+**Creating a workflow from a local YAML:** `workflow import`/`edit <path>` resolve the path *inside the agent pod*, not your PC. To ship a local definition, `workflow create <id> --workspace <ws>` (scaffold) then `dispatch --op workflow_edit --params '{"workflow_id":"…","workspace_id":"…","workflow":{…}}'` (the wrapper sends `--params` as a JSON file, so the multiline prompt survives).
 
 **`cluster --action nodes` / `--action models` return empty output today.** The handlers exist but data is not populated — open issue. `cluster --action health` works.
 
