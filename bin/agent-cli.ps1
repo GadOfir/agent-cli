@@ -97,6 +97,45 @@ if ($AgentArgs[0] -eq "config") {
     exit 0
 }
 
+# ─── Auto-stage local files (G-198) ──────────────────────────────────────────
+# File-input verbs (skill register --file, secret/service --from-file, skill
+# --body-file, workflow edit/import <path>) read the path INSIDE the agent pod.
+# To make them fully CLI-native from the operator's machine, detect a flag/arg
+# whose value is a LOCAL file, ship the file into the pod, and rewrite the arg to
+# the pod-side path. No local file ⇒ behaves exactly as before (zero regression).
+$fileFlags   = @('--file', '--from-file', '--body-file')
+$stageId     = [Guid]::NewGuid().ToString("N").Substring(0, 8)
+$stagedPaths = @()   # pod-side (== host-side) /tmp paths we staged into
+$stageSeq    = 0
+$rewritten   = New-Object System.Collections.Generic.List[string]
+for ($si = 0; $si -lt $AgentArgs.Count; $si++) {
+    $cur = $AgentArgs[$si]
+    $rewritten.Add($cur) | Out-Null
+    $candidate   = $null
+    $isFlagValue = $false
+    if (($fileFlags -contains $cur) -and ($si + 1 -lt $AgentArgs.Count)) {
+        $candidate = $AgentArgs[$si + 1]; $isFlagValue = $true
+    } elseif (($AgentArgs.Count -ge 3) -and ($AgentArgs[0] -eq 'workflow') -and (@('edit', 'import') -contains $AgentArgs[1]) -and ($si -eq 2)) {
+        $candidate = $cur   # positional path for `workflow edit|import <path>`
+    }
+    if ($candidate -and (Test-Path -LiteralPath $candidate -PathType Leaf)) {
+        $podPath = "/tmp/agent-cli-stage-$stageId-$stageSeq"
+        $stagedPaths += @{ Local = (Resolve-Path -LiteralPath $candidate).Path; Pod = $podPath }
+        $stageSeq++
+        if ($isFlagValue) {
+            $rewritten.Add($podPath) | Out-Null; $si++   # add pod path as flag value, consume original
+        } else {
+            $rewritten[$rewritten.Count - 1] = $podPath  # replace the positional path in place
+        }
+    }
+}
+$AgentArgs = $rewritten.ToArray()
+# Pod-side paths to kubectl-cp into the pod (also the host staging paths).
+$stagedPodPaths = @($stagedPaths | ForEach-Object { $_.Pod })
+if ($stagedPodPaths.Count -eq 0) { $stagedJson = "[]" }
+elseif ($stagedPodPaths.Count -eq 1) { $stagedJson = "[" + ($stagedPodPaths[0] | ConvertTo-Json -Compress) + "]" }
+else { $stagedJson = ($stagedPodPaths | ConvertTo-Json -Compress) }
+
 # ─── Serialize args as JSON ──────────────────────────────────────────────────
 # PowerShell's native-arg parser strips inner quotes no matter how we escape,
 # so we ship the args as a JSON file via scp and invoke a remote python that
@@ -118,14 +157,34 @@ try {
         exit 3
     }
 
+    # G-198: ship each auto-staged local file to the host (same /tmp path the
+    # runner then kubectl-cp's into the pod). Skipped entirely when none.
+    foreach ($sf in $stagedPaths) {
+        & scp -i $SshKey -o StrictHostKeyChecking=no -o LogLevel=ERROR -q $sf.Local "${SshHost}:$($sf.Pod)" 2>$null
+        if ($LASTEXITCODE -ne 0) {
+            Write-Error "scp failed staging local file: $($sf.Local)"
+            exit 3
+        }
+    }
+
     # Write the runner script to the same /tmp prefix so we only need one ssh
     # call. Heredoc is safe here because we're inside SSH's single command
     # buffer; bash interprets it locally on Hetzner.
     $sshScript = @"
 cat > ${remoteTmp}.py <<'PYEOF'
-import os, sys, json
+import os, sys, json, subprocess
 with open('${remoteTmp}.json') as f:
     args = json.load(f)
+# G-198: copy any auto-staged local files (now on the host) into the agent pod
+# at the same /tmp path the rewritten args reference. kubectl cp needs a pod
+# name (not a deploy), so resolve it once.
+staged = ${stagedJson}
+if staged:
+    pod = subprocess.check_output(
+        ['kubectl', 'get', 'pod', '-n', 'platform', '-l', 'app=agent',
+         '-o', 'jsonpath={.items[0].metadata.name}']).decode().strip()
+    for p in staged:
+        subprocess.run(['kubectl', 'cp', p, 'platform/%s:%s' % (pod, p), '-c', 'agent'], check=True)
 os.execvp('kubectl', [
     'kubectl', 'exec', '-n', 'platform', '-c', 'agent', 'deploy/agent', '--',
     'env',
@@ -136,7 +195,7 @@ os.execvp('kubectl', [
 PYEOF
 python3 ${remoteTmp}.py
 EC=`$?
-rm -f ${remoteTmp}.json ${remoteTmp}.py
+rm -f ${remoteTmp}.json ${remoteTmp}.py $($stagedPodPaths -join ' ')
 exit `$EC
 "@
 

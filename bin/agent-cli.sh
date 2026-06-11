@@ -82,14 +82,67 @@ if [[ "$1" == "config" ]]; then
     exit 0
 fi
 
+# ─── Auto-stage local files (G-198) ──────────────────────────────────────────
+# Make file-input verbs (skill register --file, secret/service --from-file, skill
+# --body-file, workflow edit/import <path>) fully CLI-native: when the flag/arg
+# value is a LOCAL file, ship it into the agent pod and rewrite the arg to the
+# pod-side path. No local file ⇒ unchanged behavior (the value ships verbatim).
+FILE_FLAGS=("--file" "--from-file" "--body-file")
+STAGED_PODPATHS=()
+NEW_ARGS=()
+STAGE_ID="$(date +%s)$$"
+STAGE_SEQ=0
+ORIG_ARGS=("$@")
+ARG_N=${#ORIG_ARGS[@]}
+ai=0
+while (( ai < ARG_N )); do
+    cur="${ORIG_ARGS[$ai]}"
+    NEW_ARGS+=("$cur")
+    candidate=""
+    is_flag_value=0
+    for ff in "${FILE_FLAGS[@]}"; do
+        if [[ "$cur" == "$ff" ]] && (( ai + 1 < ARG_N )); then
+            candidate="${ORIG_ARGS[$((ai+1))]}"; is_flag_value=1; break
+        fi
+    done
+    if [[ -z "$candidate" && $ARG_N -ge 3 && "${ORIG_ARGS[0]}" == "workflow" \
+          && ( "${ORIG_ARGS[1]}" == "edit" || "${ORIG_ARGS[1]}" == "import" ) && $ai -eq 2 ]]; then
+        candidate="$cur"
+    fi
+    if [[ -n "$candidate" && -f "$candidate" ]]; then
+        pod_path="/tmp/agent-cli-stage-${STAGE_ID}-${STAGE_SEQ}"
+        STAGE_SEQ=$((STAGE_SEQ + 1))
+        scp -i "$SSH_KEY" -o StrictHostKeyChecking=no -o LogLevel=ERROR -q "$candidate" "${SSH_HOST}:${pod_path}"
+        STAGED_PODPATHS+=("$pod_path")
+        if (( is_flag_value )); then
+            NEW_ARGS+=("$pod_path"); ai=$((ai + 1))
+        else
+            NEW_ARGS[${#NEW_ARGS[@]}-1]="$pod_path"
+        fi
+    fi
+    ai=$((ai + 1))
+done
+set -- "${NEW_ARGS[@]}"
+if (( ${#STAGED_PODPATHS[@]} > 0 )); then
+    STAGED_JSON=$(python3 -c 'import sys, json; print(json.dumps(sys.argv[1:]))' "${STAGED_PODPATHS[@]}")
+else
+    STAGED_JSON="[]"
+fi
+STAGED_B64=$(echo -n "$STAGED_JSON" | base64 -w0 2>/dev/null || echo -n "$STAGED_JSON" | base64)
+
 # ─── Serialize args as base64 JSON (dodges every layer of shell escaping) ────
 ARGS_JSON=$(python3 -c 'import sys, json; print(json.dumps(sys.argv[1:]))' "$@")
 ARGS_B64=$(echo -n "$ARGS_JSON" | base64 -w0 2>/dev/null || echo -n "$ARGS_JSON" | base64)
 
 REMOTE_CMD=$(cat <<EOF
 python3 -c "
-import os, sys, base64, json
+import os, sys, base64, json, subprocess
 args = json.loads(base64.b64decode('$ARGS_B64').decode())
+staged = json.loads(base64.b64decode('$STAGED_B64').decode())
+if staged:
+    pod = subprocess.check_output(['kubectl','get','pod','-n','platform','-l','app=agent','-o','jsonpath={.items[0].metadata.name}']).decode().strip()
+    for p in staged:
+        subprocess.run(['kubectl','cp', p, 'platform/%s:%s' % (pod, p), '-c', 'agent'], check=True)
 os.execvp('kubectl', [
     'kubectl', 'exec', '-n', 'platform', '-c', 'agent', 'deploy/agent', '--',
     'env',
