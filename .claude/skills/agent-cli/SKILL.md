@@ -218,7 +218,7 @@ Prompt templates are cascade-backed (`config/policy.yaml companies.LOS.prompt_te
 .\bin\agent-cli.ps1 vars set --workspace workspace-alice --key expand_model --value deepseek-chat
 ```
 
-`agent prompt {list,show,set,delete}` typed verbs are on the growth list (CLI_CONTRACT). Until they ship, use `agent dispatch` above.
+`agent prompt` typed verbs are on the growth list. Until they ship, use `agent dispatch` above. See `skill-sync.md` Rule 4 for inventory ownership.
 
 ## Customer onboarding (D-048) — a workflow, not a verb
 
@@ -251,13 +251,9 @@ Services / skills / tools **cascade from `workspace-company` by default**; custo
 per customer with the existing verbs (`ws skill --action add/remove`,
 `agent tool allow/deny`, narrow `allowed_services` via `policy set`). To register a
 repo on its own (outside the workflow): `agent repo register --url <git-url>`.
-Full contract: `docs/contracts/CUSTOMER_ONBOARDING_CONTRACT.md`.
+Customer onboarding = workspace lifecycle — flagged for future phase (see `CONTRACTX.md` legacy map).
 
-> **NO CLI/dispatch op triggers a build (G-139).** Runtime mutations land on PVC/vault;
-> the resolver overlays them on the git baseline. Git is the cold-start seed only,
-> written ONLY by the explicit promote verbs (`ws commit-policy`, `ws promote-policy`,
-> `skill promote`). If you add an op that writes `config/**` on the hot path, that's a
-> G-139-class trap — route it through the PVC overlay instead.
+> **Deploy boundary:** `CONTRACTX/cross-cutting/service-skill-cli.md` §Deploy boundary — PVC overlay = live, git/config/** = NOT CLI-authoring. No CLI op triggers a build.
 
 ## Workspace operations (`ws`)
 
