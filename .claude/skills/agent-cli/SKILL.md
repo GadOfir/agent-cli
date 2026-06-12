@@ -1,6 +1,6 @@
 ---
 name: agent-cli
-description: Run the in-cluster `agent` Go binary from this PC via local wrappers `bin/agent-cli.ps1` (PowerShell) and `bin/agent-cli.sh` (bash). Covers all 23 top-level verbs — audit, chat, cluster, dispatch, hive, llm, memory, migrate, policy, provision, repo, scan, secret, service, session, skill, test, ticket, tool, trace, vars, workflow, ws. Auth + operator identity + dispatch URL are baked in. Use when the user says "run agent X", "chat with a workspace", "scan a prompt / Prompt Guard", "drive a flow", "publish to hive", "list/show/set/clear/trace/lock/unlock/inventory/revoke policy", "set a workspace var or secret", "dispatch any op", "author a new skill / service", or any operation that maps to an `agent <subcommand>` invocation against PROD.
+description: Run the in-cluster `agent` Go binary from this PC via local wrappers `bin/agent-cli.ps1` (PowerShell) and `bin/agent-cli.sh` (bash). Covers all 24 top-level verbs — audit, chat, cluster, dispatch, hive, llm, memory, migrate, platform, policy, provision, repo, scan, secret, service, session, skill, test, ticket, tool, trace, vars, workflow, ws. Auth + operator identity + dispatch URL are baked in. Use when the user says "run agent X", "chat with a workspace", "scan a prompt / Prompt Guard", "drive a flow", "publish to hive", "list/show/set/clear/trace/lock/unlock/inventory/revoke policy", "set a workspace var or secret", "dispatch any op", "author a new skill / service", or any operation that maps to an `agent <subcommand>` invocation against PROD.
 argument-hint: "<subcommand> [flags]  — e.g. 'workflow run alice-e2e --workspace workspace-alice', 'policy inventory --workspace workspace-company --kind vars', 'hive read --workspace workspace-bob --topic hivemind/feed'"
 ---
 
@@ -31,7 +31,7 @@ Defaults match PROD:
 
 Verify with `.\bin\agent-cli.ps1 config`.
 
-## Subcommand reference — 20 top-level verbs
+## Subcommand reference — 23 top-level verbs
 
 Run `<wrapper> <subcommand> --help` for real flags. Bold = most useful in the demo.
 
@@ -44,7 +44,7 @@ Run `<wrapper> <subcommand> --help` for real flags. Bold = most useful in the de
 | **`ticket`** | Internal ticket operations (D-054/D-057). Verbs: `list`, `show`, `create`, `comment`, `status` (change status), `assign`, `handoff`, `link`, `claim`, `release`. **D-057 auto-link:** `workflow run --ticket <TCK>` auto-links the run + workflow definition to that ticket; `create_task` payload `ticket_id` auto-links a vibekanban job. Both best-effort (link failure never fails the run/job). | `--workspace`, `--json`; list filters `--mine`/`--status`/`--tag`; `--link-type`/`--target` (link); `--ticket` (on `workflow run`). **No `--limit`/`--offset`; `create` has no `--tag`.** |
 | **`tool`** | Manage per-workspace tools (D-046). Verbs: `list`, `add`, `remove`, `allow`, `deny`, `undeny`. `deny`/`undeny` are company-tier only (`--workspace workspace-company`). | `--workspace`, `--name`, `--kind`, `--source`, `--version`, `--target` |
 | **`llm bench`** | Benchmark LLM speed/cost from production Jaeger traces (`llm.call` spans, aggregated by model). `llm` is the parent command. | `--workspace`, `--model`, `--days`, `--limit`, `--sort` |
-| **`workflow`** | Full DAG lifecycle. Verbs: `list`, `create`, `edit`, `duplicate`, `delete`, `run`, `validate`, `export`, `import`, `status`, `logs`, `cancel`, `approve`, `reject`, `resume`, `build`, `schedule {list\|enable\|disable}`. Per-workspace user pack when `--workspace` is set; global base pack otherwise. `run --ticket <TCK>` auto-links a jira (D-057). | `--workspace`, `--id`, `--input`, `--worktree`, `--session`, `--resume`, `--reset-session`, `--ticket` |
+| **`workflow`** | Full DAG lifecycle. Verbs: `list`, `create`, `edit`, `duplicate`, `delete`, `run`, `validate`, `export`, `import`, `status`, `logs`, `cancel`, `approve`, `reject`, `resume`, `retry`, `build`, `catalog`, `output`, `schedule {list\|enable\|disable}`. Per-workspace user pack when `--workspace` is set; global base pack otherwise. `run --ticket <TCK>` auto-links a jira (D-057). `retry <run-id>` re-enters the DAG at the first failed node (succeeded nodes keep outputs). `catalog` lists workflow DEFINITIONS (not runs — `workflow list` shows runs). `output <run-id>` prints the terminal node's deliverable. | `--workspace`, `--id`, `--input`, `--worktree`, `--session`, `--resume`, `--reset-session`, `--ticket` |
 | **`skill`** | Inspect/manage skill registry + versions. Actions: `list`, `show`, `activate` (defaults `--dry-run`), `create`, `fork`, `delete`, `version-list`, `version-save`, `version-set-active`, `restore`, `trash-list`, `promote`. `create --tier workspace` lands on PVC; `--tier company` writes in-repo (PR-driven). `fork` is the CLI analogue of GUI Customize. | `--action`, `--id`, `--workspace`, `--tier`, `--parent`, `--new-id`, `--name`, `--description`, `--vault-refs`, `--body`, `--version`, `--note` |
 | **`hive`** | Cross-workspace messaging. Verbs: `publish`, `read`, `poll-mentions`. Default topic `hivemind/feed`. | `--workspace`, `--topic`, `--payload`, `--limit`, `--since`, `--mark-seen` |
 | **`chat`** | Talk to a workspace's chatbot. Verbs: `send`, `commands`, `history`. Each workspace has its own persona (`vars.chatbot`), model (`chat_model`), session namespace, and Iris memory. CLI-created sessions appear in the GUI chat tab automatically (same Redis namespace). See the "Chat" section below for recipes. | `--workspace`, `--message`, `--session`, `--json` |
@@ -53,21 +53,19 @@ Run `<wrapper> <subcommand> --help` for real flags. Bold = most useful in the de
 | **`trace`** | Query/assert + **live control**. `get <id>` prints span tree; `assert` exits 0 when all `--has-span`/`--has-attr` hold. **`enable`/`disable`/`level <story\|eng\|infra>`/`status`** flip tracing on/off + verbosity **with no pod restart** (see "Tracing control" below). | `--trace-id`, `--has-span`, `--has-attr`, `--workspace` |
 | **`audit verify`** | Validate HMAC chain via `AuditLog.validate()`. | `--workspace` |
 | **`memory forget`** | Hard-delete chat-agent long-term memories (Redis Iris). | `--workspace`, `--all`, `--id` |
-| **`service`** | Inspect service definitions. **Uses `--action`, NOT a positional verb.** | `--action {list\|show\|validate}`, `--id <service>`, `--workspace` |
+| **`service`** | Inspect/manage service definitions. **Uses `--action`, NOT a positional verb.** | `--action {list\|show\|validate\|create\|edit\|delete}`, `--id <service>`, `--workspace`, `--from-file` (create/edit). `delete` refuses git-seed services (`error_class: not_overlay`). |
 | **`cluster`** | Operator-plane: `--action {health\|nodes\|models\|freeze\|unfreeze}`. Freeze is the killswitch drill. | `--action` |
 | **`provision`** | Workspace lifecycle via `provision_workspace` dispatch op: `--action {list\|create\|update\|delete}`. | `--action`, `--workspace`, `--company`, `--repo`, `--overrides`, `--template` |
 | **`test run`** | Run a cluster test suite by name. | `--suite`, `--workspace` |
 | **`migrate verify-los-empty`** | Verify legacy company/LOS secret declarations + values are empty. | `--workspace` |
-| **`ws ...`** | Workspace operations. Sub-verbs: `bootstrap-cert`, `claude`, `commit-policy`, `create`, `delete`, `duplicate`, `exec`, `promote-policy`, `run`, `set-primary`, `shell`, `skill`. See "Workspace operations" below. | see per-verb help |
+| **`ws ...`** | Workspace operations. Sub-verbs: `bootstrap-cert`, `claude`, `commit-policy`, `create`, `delete`, `duplicate`, `exec`, `promote-policy`, `purge`, `restore`, `run`, `set-primary`, `shell`, `skill`, `trash-list`. See "Workspace operations" below. | see per-verb help |
 | **`repo register`** | Register a customer/external repo in the registry (`repos.<id>` + `github_token` declaration). **Build-free** — writes the PVC runtime overlay (G-139), no git commit, resolves on next dispatch. Derives the id from the URL. | `--url` (required), `--id`, `--company` |
+| **`quota`** | Show workspace rate-limit usage. Verbs: `show`. Returns current tool/llm/service per-minute counters (weighted sliding window). D-060. | `--workspace` |
+| **`budget`** | Show workspace USD spend vs caps. Verbs: `show`. Returns daily/monthly/total spend + remaining budget. D-060. | `--workspace` |
+| **`usage`** | Show workspace resource consumption. Disk MB, runs, sessions, audit log, memory. D-060. | `--workspace` |
 
 
 ## Doctor + Probe — preflight and smoke test for the CLI path
-
-Two operator-side scripts in `bin/` validate the whole CLI path BEFORE a long-running
-dispatch call hangs (the #1 failure mode: SSH to the cluster is fine but the agent pod
-is not Running, so `kubectl exec` blocks silently for 90s).
-
 ```bash
 # DOCTOR — preflight (2–10s). Checks every hop the wrapper depends on:
 #   ssh key, operator registry, ssh reachable, agent pod Running, dispatch-http pod Running, agent binary --help.
@@ -273,8 +271,19 @@ Full contract: `docs/contracts/CUSTOMER_ONBOARDING_CONTRACT.md`.
 # Clone an existing workspace (PVC + git durable). Refuses workspace-company source/dest.
 .\bin\agent-cli.ps1 ws duplicate --from workspace-alice --workspace workspace-alice-clone
 
-# Hard delete a workspace (PVC + vault keys + git entry).
+# Soft-delete a workspace (30-day recycle window). Non-scratch → recycle bin.
+# Scratch workspaces hard-delete immediately. Use --force to skip recycle.
 .\bin\agent-cli.ps1 ws delete --workspace workspace-alice-clone
+.\bin\agent-cli.ps1 ws delete --workspace workspace-alice-clone --force
+
+# List soft-deleted workspaces
+.\bin\agent-cli.ps1 ws trash-list
+
+# Restore a soft-deleted workspace from recycle (PVC + vault + Redis + PG)
+.\bin\agent-cli.ps1 ws restore --workspace workspace-alice-clone
+
+# Permanently delete from recycle bin (no undo)
+.\bin\agent-cli.ps1 ws purge --workspace workspace-alice-clone
 
 # One-shot command under workspace identity (vault env merged in)
 .\bin\agent-cli.ps1 ws exec --workspace workspace-alice -- python3 -c "import os; print(os.environ.get('LITELLM_API_KEY','')[:6])"
@@ -303,6 +312,7 @@ Full contract: `docs/contracts/CUSTOMER_ONBOARDING_CONTRACT.md`.
 # Promote PVC policy.override.yaml into the git baseline (D-022)
 .\bin\agent-cli.ps1 ws promote-policy --workspace workspace-alice
 ```
+
 
 ## Skills — three activation paths in one paragraph
 
@@ -484,7 +494,7 @@ For the canonical Alice-Dev.to demo flow, see `tests/alice_backend_baseline.py` 
 
 **`workflow` writes to per-workspace user pack only when `--workspace` is set.** Bare `agent workflow create my-flow` lands in the GLOBAL base pack (admin mode). To match GUI scope, always pass `--workspace <ws>`. `workflow list` tags each with `scope: base|user`.
 
-**`workflow list` shows RUNS, not workflow definitions.** Column header reads `WORKFLOW` but each row is a `RUN_ID`. To list available workflow IDs, use `workflow schedule list` or `workflow export <id>`.
+**`workflow list` shows RUNS, not workflow definitions.** Column header reads `WORKFLOW` but each row is a `RUN_ID`. To list available workflow IDs, use `agent workflow catalog --workspace <ws>`. `workflow catalog` lists DEFINITIONS (scope + valid/enabled/schedule); `workflow list` lists run instances.
 
 **`workflow run --input` takes ONE JSON object, not `k=v` pairs.** The flag is parsed with `json.Unmarshal`, so use `--input '{"start_url":"https://x","max_pages":2}'`. The `--input name=foo --input repo=bar` form does NOT work (last value wins, and it isn't valid JSON).
 
