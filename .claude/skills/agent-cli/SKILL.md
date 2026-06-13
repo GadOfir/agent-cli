@@ -1,6 +1,6 @@
 ---
 name: agent-cli
-description: Run the in-cluster `agent` Go binary from this PC via local wrappers `bin/agent-cli.ps1` (PowerShell) and `bin/agent-cli.sh` (bash). Covers all 24 top-level verbs — audit, chat, cluster, dispatch, hive, llm, memory, migrate, platform, policy, provision, repo, scan, secret, service, session, skill, test, ticket, tool, trace, vars, workflow, ws. Auth + operator identity + dispatch URL are baked in. Use when the user says "run agent X", "chat with a workspace", "scan a prompt / Prompt Guard", "drive a flow", "publish to hive", "list/show/set/clear/trace/lock/unlock/inventory/revoke policy", "set a workspace var or secret", "dispatch any op", "author a new skill / service", or any operation that maps to an `agent <subcommand>` invocation against PROD.
+description: Run the in-cluster `agent` Go binary from this PC via local wrappers `bin/agent-cli.ps1` (PowerShell) and `bin/agent-cli.sh` (bash). Covers all 23 top-level verbs — audit, chat, cluster, dispatch, hive, llm, memory, migrate, policy, provision, repo, scan, secret, service, session, skill, test, ticket, tool, trace, vars, workflow, ws. Auth + operator identity + dispatch URL are baked in. Use when the user says "run agent X", "chat with a workspace", "scan a prompt / Prompt Guard", "drive a flow", "publish to hive", "list/show/set/clear/trace/lock/unlock/inventory/revoke policy", "set a workspace var or secret", "dispatch any op", "author a new skill / service", or any operation that maps to an `agent <subcommand>` invocation against PROD.
 argument-hint: "<subcommand> [flags]  — e.g. 'workflow run alice-e2e --workspace workspace-alice', 'policy inventory --workspace workspace-company --kind vars', 'hive read --workspace workspace-bob --topic hivemind/feed'"
 ---
 
@@ -44,8 +44,8 @@ Run `<wrapper> <subcommand> --help` for real flags. Bold = most useful in the de
 | **`ticket`** | Internal ticket operations (D-054/D-057). Verbs: `list`, `show`, `create`, `comment`, `status` (change status), `assign`, `handoff`, `link`, `claim`, `release`. **D-057 auto-link:** `workflow run --ticket <TCK>` auto-links the run + workflow definition to that ticket; `create_task` payload `ticket_id` auto-links a vibekanban job. Both best-effort (link failure never fails the run/job). | `--workspace`, `--json`; list filters `--mine`/`--status`/`--tag`; `--link-type`/`--target` (link); `--ticket` (on `workflow run`). **No `--limit`/`--offset`; `create` has no `--tag`.** |
 | **`tool`** | Manage per-workspace tools (D-046). Verbs: `list`, `add`, `remove`, `allow`, `deny`, `undeny`. `deny`/`undeny` are company-tier only (`--workspace workspace-company`). | `--workspace`, `--name`, `--kind`, `--source`, `--version`, `--target` |
 | **`llm bench`** | Benchmark LLM speed/cost from production Jaeger traces (`llm.call` spans, aggregated by model). `llm` is the parent command. | `--workspace`, `--model`, `--days`, `--limit`, `--sort` |
-| **`workflow`** | Full DAG lifecycle. Verbs: `list`, `create`, `edit`, `duplicate`, `delete`, `run`, `validate`, `export`, `import`, `status`, `logs`, `cancel`, `approve`, `reject`, `resume`, `retry`, `build`, `catalog`, `output`, `schedule {list\|enable\|disable}`. Per-workspace user pack when `--workspace` is set; global base pack otherwise. `run --ticket <TCK>` auto-links a jira (D-057). `retry <run-id>` re-enters the DAG at the first failed node (succeeded nodes keep outputs). `catalog` lists workflow DEFINITIONS (not runs — `workflow list` shows runs). `output <run-id>` prints the terminal node's deliverable. | `--workspace`, `--id`, `--input`, `--worktree`, `--session`, `--resume`, `--reset-session`, `--ticket` |
-| **`skill`** | Inspect/manage skill registry + versions. Actions: `list`, `show`, `activate` (defaults `--dry-run`), `create`, `fork`, `delete`, `version-list`, `version-save`, `version-set-active`, `restore`, `trash-list`, `promote`. `create --tier workspace` lands on PVC; `--tier company` writes in-repo (PR-driven). `fork` is the CLI analogue of GUI Customize. | `--action`, `--id`, `--workspace`, `--tier`, `--parent`, `--new-id`, `--name`, `--description`, `--vault-refs`, `--body`, `--version`, `--note` |
+| **`workflow`** | Full DAG lifecycle. Verbs: `list`, `create`, `edit`, `duplicate`, `delete`, `run`, `validate`, `export`, `import`, `status`, `logs`, `cancel`/`stop`, `approve`, `reject`, `resume`, `retry`, `build`, `catalog`, `output`, `schedule {list\|enable\|disable}`. Per-workspace user pack when `--workspace` is set; global base pack otherwise. `run --ticket <TCK>` auto-links a jira (D-057). `stop <run-id>` is an operator-friendly alias for `cancel <run-id>`. `retry <run-id>` re-enters the DAG at the first failed node (succeeded nodes keep outputs). `catalog` lists workflow DEFINITIONS (not runs — `workflow list` shows runs). `output <run-id>` prints the terminal node's deliverable. | `--workspace`, `--id`, `--input`, `--worktree`, `--session`, `--resume`, `--reset-session`, `--ticket` |
+| **`skill`** | Inspect/manage skill registry + versions. Actions/subcommands: `list`, `show`, `activate` (defaults `--dry-run`), `create`, `register`, `insert` (alias for register), `edit`, `validate`, `fork`, `delete`, `version-list`, `version-save`, `version-set-active`, `restore`, `trash-list`, `promote`. `create --tier workspace` lands on PVC; `create --tier company` and `register --tier company` land in the runtime PVC overlay and floor-union to workspaces. `fork` is the CLI analogue of GUI Customize. | `--action`, `--id`, `--workspace`, `--tier`, `--parent`, `--new-id`, `--name`, `--description`, `--vault-refs`, `--body`, `--body-file`, `--file`, `--version`, `--note` |
 | **`hive`** | Cross-workspace messaging. Verbs: `publish`, `read`, `poll-mentions`. Default topic `hivemind/feed`. | `--workspace`, `--topic`, `--payload`, `--limit`, `--since`, `--mark-seen` |
 | **`chat`** | Talk to a workspace's chatbot. Verbs: `send`, `commands`, `history`. Each workspace has its own persona (`vars.chatbot`), model (`chat_model`), session namespace, and Iris memory. CLI-created sessions appear in the GUI chat tab automatically (same Redis namespace). See the "Chat" section below for recipes. | `--workspace`, `--message`, `--session`, `--json` |
 | **`scan`** | Prompt-injection scanning + scan-pattern registry (Prompt Guard — the CLI peer of the GUI Prompt Guard view). Verbs: `run` (regex-scan a prompt, observe-only), `verify` (on-demand LLM judge, advisory), `list` (recent injection-scan events = the timeline), `pattern {list\|add\|delete}` (workspace scan families — baked families can't be deleted, regex validated server-side). | `--workspace`, `--prompt`, `--id` |
@@ -73,10 +73,10 @@ bash bin/agent-cli-doctor.sh      # linux/wsl
 # Expected: 6/6 pass
 
 # PROBE — all-verb smoke (15–30s). Runs `agent <verb> --help` for every top-level verb
-# + key sub-trees (ticket, tool, ws, llm, audit, workflow build). No dispatch, no LLM,
+# + key sub-trees (ticket, tool, ws, ws skill, skill, workflow, llm, audit). No dispatch, no LLM,
 # no state mutation. Validates the Cobra wire-up after any cmd/agent/cmd/ reorg.
 bash bin/agent-cli-probe.sh       # linux/wsl
-# Expected: 54/54 pass (23 top-level + 31 sub-verbs)
+# Expected: 96/96 pass (23 top-level + 73 sub-verbs/aliases)
 ```
 
 Both use the same SSH defaults/env overrides as the `agent-cli.sh` wrapper. The doctor
@@ -297,7 +297,7 @@ Customer onboarding = workspace lifecycle — flagged for future phase (see `CON
 .\bin\agent-cli.ps1 ws set-primary agent-platform --workspace workspace-alice
 
 # Workspace-scoped skill membership (gates which skills may activate)
-.\bin\agent-cli.ps1 ws skill --action {add|remove|list} --workspace workspace-alice --id github
+.\bin\agent-cli.ps1 ws skill {add|insert|remove|list} --workspace workspace-alice --id github
 
 # Commit + push .platform.yml using a human-supplied GitHub PAT (paste/env/stdin — never disk)
 .\bin\agent-cli.ps1 ws commit-policy --workspace workspace-alice --message "..." --token-paste
@@ -312,7 +312,7 @@ Customer onboarding = workspace lifecycle — flagged for future phase (see `CON
 
 ## Skills — three activation paths in one paragraph
 
-A workspace can use a skill via: (1) **membership** — `ws skill --action add` writes `workspaces.<ws>.overrides.skills` in policy. Gates *availability* but doesn't activate. (2) **Pre-activation before turn 0** — `ws run --skills slack,github` or `requires_skills:` / `skills:` in the workflow YAML. Pi-direct emits one `skill_activated` span before the first `llm.call`. (3) **LLM self-activation** — every workspace has the `activate_skill` tool by default; the LLM calls `activate_skill(skill_id="...")` mid-flow. Vault tokens NEVER enter the LLM message context — `vault_refs` resolve at HTTP request time inside `ext.call`. If the LLM tries to activate a skill the workspace lacks membership for, dispatch refuses with `error_class=policy_rejection`.
+A workspace can use a skill via: (1) **membership** — `ws skill add <id>` or `ws skill insert <id>` writes `workspaces.<ws>.overrides.skills` in policy. Gates *availability* but doesn't activate. (2) **Pre-activation before turn 0** — `ws run --skills slack,github` or `requires_skills:` / `skills:` in the workflow YAML. Pi-direct emits one `skill_activated` span before the first `llm.call`. (3) **LLM self-activation** — every workspace has the `activate_skill` tool by default; the LLM calls `activate_skill(skill_id="...")` mid-flow. Vault tokens NEVER enter the LLM message context — `vault_refs` resolve at HTTP request time inside `ext.call`. If the LLM tries to activate a skill the workspace lacks membership for, dispatch refuses with `error_class=policy_rejection`.
 
 ## Tracing control (live on/off + level — no pod restart)
 
@@ -472,7 +472,7 @@ Sessions live in Redis with `SESSION_TTL_HOURS` (default 24h). Workspace prefix 
 .\bin\agent-cli.ps1 workflow import alice-e2e.yaml --id alice-e2e-copy --workspace workspace-alice --force
 
 # Workspace-scoped skill membership
-.\bin\agent-cli.ps1 ws skill --action {list|add|remove} --workspace workspace-alice --id slack
+.\bin\agent-cli.ps1 ws skill {list|add|insert|remove} --workspace workspace-alice --id slack
 
 # Killswitch drill
 .\bin\agent-cli.ps1 cluster --action freeze
@@ -520,7 +520,7 @@ bin/
   agent-cli.sh           bash wrapper (mac/linux/wsl)
   agent-cli.env.example  config template (copy to agent-cli.env, gitignored)
   agent-cli-doctor.sh    preflight: validate SSH + pod + binary before any long dispatch
-  agent-cli-probe.sh     smoke: `agent <verb> --help` for all 54 verb/variants (PROD only)
+  agent-cli-probe.sh     smoke: `agent <verb> --help` for all 96 verb/variants (PROD only)
 ```
 
 Both wrappers do exactly the same thing: serialize args as JSON, scp to Hetzner, run a tiny remote python that execs `kubectl exec -n platform deploy/agent -- env OPERATOR_NAME=… DISPATCH_URL=… /usr/local/bin/agent <args>`. Exit code and signals pass through.
