@@ -496,7 +496,20 @@ For the canonical Alice-Dev.to demo flow, see `tests/alice_backend_baseline.py` 
 
 **`ws exec -- <cmd>` can't pass dash-flags to the inner command.** Cobra parses any `-x` after `--` as its own flag (`bash -c`, `bash -lc`, `find -type` all fail with "unknown flag"). Workarounds: run dash-free commands (`ls <path>`), or use raw `kubectl exec` via the `cluster`/`hetzner-ssh` skill for anything needing flags.
 
-**Creating a workflow from a local YAML:** `workflow import`/`edit <path>` resolve the path *inside the agent pod*, not your PC. To ship a local definition, `workflow create <id> --workspace <ws>` (scaffold) then `dispatch --op workflow_edit --params '{"workflow_id":"…","workspace_id":"…","workflow":{…}}'` (the wrapper sends `--params` as a JSON file, so the multiline prompt survives).
+**Creating / editing a workflow from a local YAML (CLI-native, both paths).** Authoring a workflow is a fixed lifecycle — follow it in order:
+
+1. **Take inspiration** — list definitions and read an existing one:
+   - `workflow catalog --workspace <ws>` — lists workflow DEFINITIONS (not runs).
+   - `workflow export <id> --workspace <ws>` — prints the full YAML of an existing workflow. Clone-and-edit this instead of writing from scratch.
+2. **Scaffold** — `workflow edit` EDITS, it does not CREATE. A bare `workflow edit <new-id>` fails `not_found`. Create the empty shell first:
+   - `workflow create <id> --workspace <ws>` — scaffolds an empty user-pack workflow.
+3. **Set content** — two paths, pick by who is running:
+   - **Operator path (local YAML file):** `workflow edit <local-path> --workspace <ws> --id <id>`. The wrapper AUTO-STAGES the local file into the pod (G-198 — the positional path for `workflow edit|import <path>` and `--file`/`--from-file`/`--body-file` flags are kubectl-cp'd in and the arg rewritten to the pod path). NO manual scp / `kubectl cp` / `kubectl exec` needed — that is the deprecated dance.
+   - **LLM-in-pod path (no local file, agent builds a dict):** `dispatch --op workflow_edit --params '{"workflow_id":"<id>","workspace_id":"<ws>","workflow":{…}}'`. The wrapper ships `--params` as a JSON file via scp, so a large multi-node workflow survives intact (no escape-soup). This is the path the gap-lane / chatbot agent uses when it authors a workflow from its own tool surface.
+4. **Validate** — `workflow validate <id> --workspace <ws>` → `ok: true`. Catches missing `{{VAR}}` (every template var must be in `defaults:`, policy vars, or runtime `--input`; `run_id` is engine-injected), bad `depends_on`, and DAG cycles. Shell nodes with multi-line inline Python in `command:` block scalars break YAML — extract to `scripts/*.py` and call it.
+5. **Run / delete** — `workflow run <id> --workspace <ws> [--ticket <TCK>] [--input '{…}']`; `workflow delete <id> --workspace <ws>` removes a user-pack workflow.
+
+ONE workflow, many nodes > many small workflows. A DAG of `pi`/`shell`/`dispatch`/`approval` nodes in ONE YAML is "one workflow" (work-model Invariant 8a — gap-lane is the single reusable template). Do NOT split phases into separate workflow files chained by `type: workflow` nodes unless a child genuinely has a second independent caller (deletion test: one caller = inline it).
 
 **`cluster --action nodes` / `--action models` return empty output today.** The handlers exist but data is not populated — open issue. `cluster --action health` works.
 
