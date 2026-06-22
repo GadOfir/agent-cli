@@ -236,7 +236,19 @@ exit `$EC
     $stderrText = $stderrTask.Result
     $sshExit = $proc.ExitCode
 
-    if ($stdoutText) { [Console]::Out.Write($stdoutText) }
+    # CX-082: `--raw` is for machine capture (`$x = & agent-cli ... --raw`).
+    # [Console]::Out.Write bypasses the PowerShell success pipeline, so `$x` stays
+    # EMPTY on Windows (text prints to the host but is unassignable/unredirectable).
+    # For --raw, emit on the success pipeline so it captures + redirects cleanly;
+    # human (non-raw) output keeps the verbatim console write (interleaves with
+    # the [TRACE] stderr lines as before).
+    if ($stdoutText) {
+        if (($AgentArgs -contains '--raw') -or ($AgentArgs -contains '--json')) {
+            Write-Output $stdoutText
+        } else {
+            [Console]::Out.Write($stdoutText)
+        }
+    }
 
     $traceIds = @()
     if ($stderrText) {
