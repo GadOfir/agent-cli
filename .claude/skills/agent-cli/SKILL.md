@@ -31,7 +31,7 @@ Defaults match PROD:
 
 Verify with `.\bin\agent-cli.ps1 config`.
 
-## Subcommand reference — 23 top-level verbs
+## Subcommand reference — 24 top-level verbs
 
 Run `<wrapper> <subcommand> --help` for real flags. Bold = most useful in the demo.
 
@@ -48,6 +48,7 @@ Run `<wrapper> <subcommand> --help` for real flags. Bold = most useful in the de
 | **`skill`** | Inspect/manage skill registry + versions. Actions/subcommands: `list`, `show`, `activate` (defaults `--dry-run`), `create`, `register`, `insert` (alias for register), `edit`, `validate`, `fork`, `delete`, `version-list`, `version-save`, `version-set-active`, `restore`, `trash-list`, `promote`. `create --tier workspace` lands on PVC; `create --tier company` and `register --tier company` land in the runtime PVC overlay and floor-union to workspaces. `fork` is the CLI analogue of GUI Customize. | `--action`, `--id`, `--workspace`, `--tier`, `--parent`, `--new-id`, `--name`, `--description`, `--vault-refs`, `--body`, `--body-file`, `--file`, `--version`, `--note` |
 | **`hive`** | Cross-workspace messaging. Verbs: `publish`, `read`, `poll-mentions`. Default topic `hivemind/feed`. | `--workspace`, `--topic`, `--payload`, `--limit`, `--since`, `--mark-seen` |
 | **`chat`** | Talk to a workspace's chatbot. Verbs: `send`, `commands`, `history`. Each workspace has its own persona (`vars.chatbot`), model (`chat_model`), session namespace, and Iris memory. CLI-created sessions appear in the GUI chat tab automatically (same Redis namespace). See the "Chat" section below for recipes. | `--workspace`, `--message`, `--session`, `--json` |
+| **`loop`** | Scheduled loops (per-workspace registry; agent-loop.md). Verbs: `list`, `show --id <id>`, `create`, `edit`, `delete`, `enable`, `disable`, `fire`, `status`, `pause`, `resume`. A loop = `trigger` + `target`. Target flags: **`--target-kind <prompt\|workflow>`** (default `prompt`), `--prompt` (prompt kind), **`--workflow <id>`** + **`--workflow-input`** (workflow kind; catalog-validated; NO `op` kind). Bound flags: **`--ttl`** (`2h`/`7d`/`none`), **`--max-fires`**, **`--fire-condition`** (known gate e.g. `open_tickets`; UNKNOWN FAILS CLOSED). **`--notify <off\|gates\|lifecycle>`** (default `lifecycle`; fire/complete chat msg best-effort), **`--model`** (override; default = workspace `chat_model`), `--interval`, `--creates-ticket`. `fire` prints `run_ref`/`run_id`/`req_id`. Locked seed (`default-reconciler`) rejects overwrite. **`show` requires `--id`.** | `--workspace`, `--id`, `--json` |
 | **`scan`** | Prompt-injection scanning + scan-pattern registry (Prompt Guard — the CLI peer of the GUI Prompt Guard view). Verbs: `run` (regex-scan a prompt, observe-only), `verify` (on-demand LLM judge, advisory), `list` (recent injection-scan events = the timeline), `pattern {list\|add\|delete}` (workspace scan families — baked families can't be deleted, regex validated server-side). | `--workspace`, `--prompt`, `--id` |
 | **`session`** | Inspect / manage pi_direct + chat sessions (same Redis namespace). Verbs: `list`, `show`, `delete`, `reset`. Answers "what did Bob do today?". Backed by `lib.session_manager`. | `--workspace`, `--state running\|paused\|completed\|errored` (list); `<session-id>` (show/delete/reset) |
 | **`trace`** | Query/assert + **live control**. `get <id>` prints span tree; `assert` exits 0 when all `--has-span`/`--has-attr` hold. **`enable`/`disable`/`level <story\|eng\|infra>`/`status`** flip tracing on/off + verbosity **with no pod restart** (see "Tracing control" below). | `--trace-id`, `--has-span`, `--has-attr`, `--workspace` |
@@ -262,7 +263,8 @@ Customer onboarding = workspace lifecycle — flagged for future phase (see `CON
 # from workspace-company. Idempotent. UC-0 fields required only for workspace-company itself.
 .\bin\agent-cli.ps1 ws create --workspace workspace-alice2 --repo agent-platform `
     --skills github,knowledge_base
-# Other flags: --company --owner-email --model --chat-model --model-fallback --allowed-services
+# Other flags: --company --owner-email --model --chat-model --model-fallback --allowed-services --ttl <dur>
+# --ttl auto-expires the workspace (loop-tick sweep). ws delete supports --force (cancel runs + immediate recycle). Both dispatch from workspace-company; output prints the ACTUAL target workspace (CX-123 resolved, Phase 0).
 
 # Clone an existing workspace (PVC + git durable). Refuses workspace-company source/dest.
 .\bin\agent-cli.ps1 ws duplicate --from workspace-alice --workspace workspace-alice-clone
