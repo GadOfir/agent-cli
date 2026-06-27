@@ -422,6 +422,8 @@ The cascade is 3-tier (company -> repo -> workspace). Every field belongs to ONE
 
 Each workspace has its OWN chatbot. The persona comes from `vars.chatbot` (falls back to `vars.system_prompt`), the model from `chat_model` (decoupled from the workflow-driving `model`), sessions live under workspace-prefixed Redis keys (`sess-<workspace>-<id>`), and long-term memory namespaces are per workspace (Redis Iris, D-032). Slash messages (`/help`, `/skills`, `/clear`) short-circuit before the LLM in the `chat_send` handler — they don't consume tokens or LLM quota.
 
+**Resumable pauses (not errors):** if a turn pauses — `yielded_to_operator` (the bot asks a clarifying question) or `max_turns_exceeded` — `chat send` returns `success:true` with the question/partial as the reply (NOT "Sorry: …") and the session stays **resumable**: just send the next message to continue. Real errors still surface as failures. (CX-127.)
+
 **GUI continuity:** sessions are stored under workspace-prefixed Redis keys keyed only by `session_id`. Anything written through `chat_send` from EITHER the CLI or the GUI shows up in `agent session list --workspace <ws>` and in the GUI chat tab's session sidebar without further work. Copy the `session_id` from CLI output and paste it into the GUI to resume the same conversation.
 
 ```powershell
