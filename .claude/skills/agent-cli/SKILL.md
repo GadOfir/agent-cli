@@ -1,6 +1,6 @@
 ---
 name: agent-cli
-description: Run the in-cluster `agent` Go binary from this PC via local wrappers `bin/agent-cli.ps1` (PowerShell) and `bin/agent-cli.sh` (bash). Covers all 23 top-level verbs — audit, chat, cluster, dispatch, hive, llm, memory, migrate, policy, provision, repo, scan, secret, service, session, skill, test, ticket, tool, trace, vars, workflow, ws. Auth + operator identity + dispatch URL are baked in. Use when the user says "run agent X", "chat with a workspace", "scan a prompt / Prompt Guard", "drive a flow", "publish to hive", "list/show/set/clear/trace/lock/unlock/inventory/revoke policy", "set a workspace var or secret", "dispatch any op", "author a new skill / service", or any operation that maps to an `agent <subcommand>` invocation against PROD.
+description: Run the in-cluster `agent` Go binary from this PC via local wrappers `bin/agent-cli.ps1` (PowerShell) and `bin/agent-cli.sh` (bash). Covers all 29 top-level verbs, including service/tool authoring and lifecycle, content TTL, workflows, policy, and workspace operations. Auth + operator identity + dispatch URL are baked in. Use when the user says "run agent X", "chat with a workspace", "scan a prompt / Prompt Guard", "drive a flow", "publish to hive", "list/show/set/clear/trace/lock/unlock/inventory/revoke policy", "set a workspace var or secret", "dispatch any op", "author a skill/service/tool", or any operation that maps to an `agent <subcommand>` invocation against PROD.
 argument-hint: "<subcommand> [flags]  — e.g. 'workflow run alice-e2e --workspace workspace-alice', 'policy inventory --workspace workspace-company --kind vars', 'hive read --workspace workspace-bob --topic hivemind/feed'"
 ---
 
@@ -31,7 +31,7 @@ Defaults match PROD:
 
 Verify with `.\bin\agent-cli.ps1 config`.
 
-## Subcommand reference — 24 top-level verbs
+## Subcommand reference — 29 top-level verbs
 
 Run `<wrapper> <subcommand> --help` for real flags. Bold = most useful in the demo.
 
@@ -42,7 +42,7 @@ Run `<wrapper> <subcommand> --help` for real flags. Bold = most useful in the de
 | **`vars`** | Manage workspace-tier vars (PVC-backed). Verbs: `set`, `get`, `list`, `delete`. Key vars: `system_prompt`, `chatbot` (chat persona), `expand_model` (Smart Expand LLM, e.g. `deepseek-chat`). | `--workspace`, `--key`, `--value`, `--type {text\|secret}` |
 | **`secret`** | Manage age-encrypted secrets. Verbs: `set`, `get-meta` (value NEVER returned), `list`, `delete`. | `--workspace`, `--repo`, `--key`, `--value`, `--service` |
 | **`ticket`** | Internal ticket operations (D-054/D-057). Verbs: `list`, `show`, `create`, `comment`, `status` (change status), `assign`, `handoff`, `link`, `claim`, `release`. **D-057 auto-link:** `workflow run --ticket <TCK>` auto-links the run + workflow definition to that ticket; `create_task` payload `ticket_id` auto-links a vibekanban job. Both best-effort (link failure never fails the run/job). | `--workspace`, `--json`; list filters `--mine`/`--status`/`--tag`; `--link-type`/`--target` (link); `--ticket` (on `workflow run`). **No `--limit`/`--offset`; `create` has no `--tag`.** |
-| **`tool`** | Manage per-workspace tools (D-046). Verbs: `list`, `add`, `remove`, `allow`, `deny`, `undeny`. `deny`/`undeny` are company-tier only (`--workspace workspace-company`). | `--workspace`, `--name`, `--kind`, `--source`, `--version`, `--target` |
+| **`tool`** | Per-workspace tool authoring + lifecycle. Verbs: `list`, `add`, `remove`, `allow`, `deny`, `undeny`, `restore`, `trash-list`, `version-list`, `version-restore`. `add` is declarative; use the `add-tool` recipe for agentic staging+registration. | `--workspace`, `--name`, `--kind`, `--source`, `--version`, `--ttl`, `--target`, `--recycle-dir` |
 | **`llm bench`** | Benchmark LLM speed/cost from production Jaeger traces (`llm.call` spans, aggregated by model). `llm` is the parent command. | `--workspace`, `--model`, `--days`, `--limit`, `--sort` |
 | **`workflow`** | Full DAG lifecycle. Verbs: `list`, `create`, `edit`, `duplicate`, `delete`, `run`, `validate`, `export`, `import`, `status`, `logs`, `cancel`/`stop`, `approve`, `reject`, `resume`, `retry`, `build`, `catalog`, `output`, `schedule {list\|enable\|disable}`. Per-workspace user pack when `--workspace` is set; global base pack otherwise. `run --ticket <TCK>` auto-links a jira (D-057). `stop <run-id>` is an operator-friendly alias for `cancel <run-id>`. `retry <run-id>` re-enters the DAG at the first failed node (succeeded nodes keep outputs). `catalog` lists workflow DEFINITIONS (not runs — `workflow list` shows runs). `output <run-id>` prints the terminal node's deliverable. | `--workspace`, `--id`, `--input`, `--worktree`, `--session`, `--resume`, `--reset-session`, `--ticket` |
 | **`skill`** | Inspect/manage skill registry + versions. Actions/subcommands: `list`, `show`, `activate` (defaults `--dry-run`), `create`, `register`, `insert` (alias for register), `edit`, `validate`, `fork`, `delete`, `version-list`, `version-save`, `version-set-active`, `restore`, `trash-list`, `promote`. `create --tier workspace` lands on PVC; `create --tier company` and `register --tier company` land in the runtime PVC overlay and floor-union to workspaces. `fork` is the CLI analogue of GUI Customize. | `--action`, `--id`, `--workspace`, `--tier`, `--parent`, `--new-id`, `--name`, `--description`, `--vault-refs`, `--body`, `--body-file`, `--file`, `--version`, `--note` |
@@ -54,7 +54,8 @@ Run `<wrapper> <subcommand> --help` for real flags. Bold = most useful in the de
 | **`trace`** | Query/assert + **live control**. `get <id>` prints span tree; `assert` exits 0 when all `--has-span`/`--has-attr` hold. **`enable`/`disable`/`level <story\|eng\|infra>`/`status`** flip tracing on/off + verbosity **with no pod restart** (see "Tracing control" below). | `--trace-id`, `--has-span`, `--has-attr`, `--workspace` |
 | **`audit verify`** | Validate HMAC chain via `AuditLog.validate()`. | `--workspace` |
 | **`memory forget`** | Hard-delete chat-agent long-term memories (Redis Iris). | `--workspace`, `--all`, `--id` |
-| **`service`** | Inspect/manage service definitions. **Uses `--action`, NOT a positional verb.** | `--action {list\|show\|validate\|create\|edit\|delete}`, `--id <service>`, `--workspace`, `--from-file` (create/edit). `delete` refuses git-seed services (`error_class: not_overlay`). |
+| **`service`** | Service authoring + lifecycle. Verbs: `list`, `show`, `validate`, `create`, `edit`, `delete`, `restore`, `trash-list`, `version-list`, `version-restore`. Positional subcommands are canonical; `--action` remains a back-compat alias. | `--id`, `--workspace`, `--from-file`, `--ttl`, `--recycle-dir`, `--version`. `delete` refuses git-seed services (`error_class: not_overlay`). |
+| **`ttl`** | Content TTL lifecycle. Verbs: `show`, `list`, `set`, `extend`, `clear`. Applies to registered content kinds including skill, workflow, service, and tool; expiry recycles rather than hard-deletes. | `--workspace`; set: `--ttl`, `--idle-ttl`, `--keep-last`, `--reason`; extend: `--by`; list: `--type`, `--expiring-within` |
 | **`cluster`** | Operator-plane: `--action {health\|nodes\|models\|freeze\|unfreeze}`. Freeze is the killswitch drill. | `--action` |
 | **`provision`** | Workspace lifecycle via `provision_workspace` dispatch op: `--action {list\|create\|update\|delete}`. | `--action`, `--workspace`, `--company`, `--repo`, `--overrides`, `--template` |
 | **`test run`** | Run a cluster test suite by name. | `--suite`, `--workspace` |
@@ -65,6 +66,261 @@ Run `<wrapper> <subcommand> --help` for real flags. Bold = most useful in the de
 | **`budget`** | Show workspace USD spend vs caps. Verbs: `show`. Returns daily/monthly/total spend + remaining budget. D-060. | `--workspace` |
 | **`usage`** | Show workspace resource consumption. Disk MB, runs, sessions, audit log, memory. D-060. | `--workspace` |
 
+## Machine-checked exact CLI surface
+
+This table is the drift-enforcement mirror of `tests/golden/cli_surface.json`.
+`scripts/agent_cli_skill_drift_check.py` compares it in both directions, and
+`sync-agent-cli` refuses to mirror this skill when any command or flag differs.
+
+<!-- agent-cli-surface:start -->
+| Command path | Exact flags |
+|---|---|
+| `agent` | `--help` |
+| `agent audit` | `--help` |
+| `agent audit verify` | `--help`, `--workspace` |
+| `agent budget` | `--help` |
+| `agent budget show` | `--help`, `--json`, `--workspace` |
+| `agent chat` | `--help` |
+| `agent chat commands` | `--help`, `--json`, `--workspace` |
+| `agent chat history` | `--help`, `--json`, `--session`, `--workspace` |
+| `agent chat send` | `--help`, `--json`, `--message`, `--session`, `--workspace` |
+| `agent cluster` | `--action`, `--help` |
+| `agent cluster freeze` | `--action`, `--help` |
+| `agent cluster full` | `--action`, `--help` |
+| `agent cluster health` | `--action`, `--help` |
+| `agent cluster models` | `--action`, `--help` |
+| `agent cluster nodes` | `--action`, `--help` |
+| `agent cluster unfreeze` | `--action`, `--help` |
+| `agent dispatch` | `--help`, `--op`, `--params`, `--raw`, `--url`, `--workspace` |
+| `agent hive` | `--help` |
+| `agent hive poll-mentions` | `--help`, `--mark-seen`, `--workspace` |
+| `agent hive publish` | `--content-type`, `--help`, `--mentions`, `--payload`, `--topic`, `--workspace` |
+| `agent hive read` | `--help`, `--limit`, `--since`, `--topic`, `--workspace` |
+| `agent llm` | `--help` |
+| `agent llm bench` | `--all-svcs`, `--help`, `--limit`, `--lookback`, `--services` |
+| `agent loop` | `--help` |
+| `agent loop create` | `--creates-ticket`, `--fire-condition`, `--help`, `--id`, `--interval`, `--json`, `--max-fires`, `--notify`, `--prompt`, `--prompt-file`, `--target-kind`, `--ttl`, `--unit`, `--vars`, `--workflow`, `--workflow-input`, `--workspace` |
+| `agent loop delete` | `--help`, `--id`, `--json`, `--workspace` |
+| `agent loop disable` | `--help`, `--id`, `--json`, `--workspace` |
+| `agent loop edit` | `--creates-ticket`, `--fire-condition`, `--help`, `--id`, `--interval`, `--json`, `--max-fires`, `--notify`, `--prompt`, `--prompt-file`, `--target-kind`, `--ttl`, `--unit`, `--vars`, `--workflow`, `--workflow-input`, `--workspace` |
+| `agent loop enable` | `--help`, `--id`, `--json`, `--workspace` |
+| `agent loop fire` | `--help`, `--id`, `--json`, `--workspace` |
+| `agent loop list` | `--help`, `--json`, `--workspace` |
+| `agent loop pause` | `--help`, `--json`, `--workspace` |
+| `agent loop resume` | `--help`, `--json`, `--workspace` |
+| `agent loop show` | `--help`, `--id`, `--json`, `--workspace` |
+| `agent loop status` | `--help`, `--json`, `--workspace` |
+| `agent memory` | `--help` |
+| `agent memory forget` | `--help`, `--principal`, `--workspace` |
+| `agent migrate` | `--help` |
+| `agent migrate verify-los-empty` | `--help` |
+| `agent platform` | `--help` |
+| `agent platform telegram` | `--help` |
+| `agent policy` | `--help` |
+| `agent policy clear` | `--field`, `--help`, `--json`, `--workspace` |
+| `agent policy inventory` | `--help`, `--json`, `--kind`, `--workspace` |
+| `agent policy lock` | `--field`, `--help`, `--json`, `--reason`, `--workspace` |
+| `agent policy revoke` | `--help`, `--json`, `--key`, `--kind`, `--reason`, `--target-id`, `--target-tier`, `--workspace` |
+| `agent policy set` | `--field`, `--help`, `--json`, `--value`, `--workspace` |
+| `agent policy show` | `--help`, `--json`, `--workspace` |
+| `agent policy trace` | `--field`, `--help`, `--json`, `--workspace` |
+| `agent policy unlock` | `--field`, `--help`, `--json`, `--workspace` |
+| `agent provision` | `--action`, `--company`, `--help`, `--overrides`, `--repo`, `--template`, `--workspace` |
+| `agent provision create` | `--action`, `--company`, `--help`, `--overrides`, `--repo`, `--template`, `--workspace` |
+| `agent provision delete` | `--action`, `--company`, `--help`, `--overrides`, `--repo`, `--template`, `--workspace` |
+| `agent provision list` | `--action`, `--company`, `--help`, `--overrides`, `--repo`, `--template`, `--workspace` |
+| `agent provision update` | `--action`, `--company`, `--help`, `--overrides`, `--repo`, `--template`, `--workspace` |
+| `agent quota` | `--help` |
+| `agent quota show` | `--help`, `--json`, `--workspace` |
+| `agent repo` | `--help` |
+| `agent repo register` | `--company`, `--help`, `--id`, `--url` |
+| `agent scan` | `--help` |
+| `agent scan code` | `--domains`, `--help`, `--json`, `--list-domains`, `--max-turns`, `--target` |
+| `agent scan list` | `--help`, `--json`, `--limit`, `--workspace` |
+| `agent scan pattern` | `--help` |
+| `agent scan run` | `--help`, `--json`, `--prompt`, `--workspace` |
+| `agent scan verify` | `--help`, `--json`, `--model`, `--prompt`, `--workspace` |
+| `agent secret` | `--help` |
+| `agent secret delete` | `--help`, `--key`, `--repo`, `--workspace` |
+| `agent secret get-meta` | `--help`, `--key`, `--workspace` |
+| `agent secret list` | `--help`, `--source`, `--workspace` |
+| `agent secret set` | `--declare-only`, `--from-file`, `--hard-lock`, `--help`, `--key`, `--repo`, `--service`, `--soft-lock`, `--value`, `--workspace` |
+| `agent service` | `--action`, `--from-file`, `--help`, `--id`, `--recycle-dir`, `--ttl`, `--version`, `--workspace` |
+| `agent service create` | `--action`, `--from-file`, `--help`, `--id`, `--recycle-dir`, `--ttl`, `--version`, `--workspace` |
+| `agent service delete` | `--action`, `--from-file`, `--help`, `--id`, `--recycle-dir`, `--ttl`, `--version`, `--workspace` |
+| `agent service edit` | `--action`, `--from-file`, `--help`, `--id`, `--recycle-dir`, `--ttl`, `--version`, `--workspace` |
+| `agent service list` | `--action`, `--from-file`, `--help`, `--id`, `--recycle-dir`, `--ttl`, `--version`, `--workspace` |
+| `agent service restore` | `--action`, `--from-file`, `--help`, `--id`, `--recycle-dir`, `--ttl`, `--version`, `--workspace` |
+| `agent service show` | `--action`, `--from-file`, `--help`, `--id`, `--recycle-dir`, `--ttl`, `--version`, `--workspace` |
+| `agent service trash-list` | `--action`, `--from-file`, `--help`, `--id`, `--recycle-dir`, `--ttl`, `--version`, `--workspace` |
+| `agent service validate` | `--action`, `--from-file`, `--help`, `--id`, `--recycle-dir`, `--ttl`, `--version`, `--workspace` |
+| `agent service version-list` | `--action`, `--from-file`, `--help`, `--id`, `--recycle-dir`, `--ttl`, `--version`, `--workspace` |
+| `agent service version-restore` | `--action`, `--from-file`, `--help`, `--id`, `--recycle-dir`, `--ttl`, `--version`, `--workspace` |
+| `agent session` | `--help` |
+| `agent session delete` | `--help`, `--workspace` |
+| `agent session list` | `--help`, `--state`, `--workspace` |
+| `agent session rename` | `--help`, `--name`, `--workspace` |
+| `agent session reset` | `--help`, `--to-turn`, `--workspace` |
+| `agent session show` | `--help`, `--workspace` |
+| `agent skill` | `--action`, `--add-service`, `--add-tool`, `--add-var`, `--body`, `--body-file`, `--description`, `--dry-run`, `--file`, `--force`, `--from`, `--group`, `--help`, `--id`, `--idle-ttl`, `--keep-last`, `--message`, `--name`, `--new-id`, `--note`, `--parent`, `--pr`, `--remove-service`, `--remove-tool`, `--services`, `--set-description`, `--set-system-prompt`, `--system-prompt`, `--tags`, `--tier`, `--tools`, `--ttl`, `--vars`, `--vault-refs`, `--verbose`, `--version`, `--workspace` |
+| `agent skill activate` | `--action`, `--add-service`, `--add-tool`, `--add-var`, `--body`, `--body-file`, `--description`, `--dry-run`, `--file`, `--force`, `--from`, `--group`, `--help`, `--id`, `--idle-ttl`, `--keep-last`, `--message`, `--name`, `--new-id`, `--note`, `--parent`, `--pr`, `--remove-service`, `--remove-tool`, `--services`, `--set-description`, `--set-system-prompt`, `--system-prompt`, `--tags`, `--tier`, `--tools`, `--ttl`, `--vars`, `--vault-refs`, `--verbose`, `--version`, `--workspace` |
+| `agent skill create` | `--action`, `--add-service`, `--add-tool`, `--add-var`, `--body`, `--body-file`, `--description`, `--dry-run`, `--file`, `--force`, `--from`, `--group`, `--help`, `--id`, `--idle-ttl`, `--keep-last`, `--message`, `--name`, `--new-id`, `--note`, `--parent`, `--pr`, `--remove-service`, `--remove-tool`, `--services`, `--set-description`, `--set-system-prompt`, `--system-prompt`, `--tags`, `--tier`, `--tools`, `--ttl`, `--vars`, `--vault-refs`, `--verbose`, `--version`, `--workspace` |
+| `agent skill delete` | `--action`, `--add-service`, `--add-tool`, `--add-var`, `--body`, `--body-file`, `--description`, `--dry-run`, `--file`, `--force`, `--from`, `--group`, `--help`, `--id`, `--idle-ttl`, `--keep-last`, `--message`, `--name`, `--new-id`, `--note`, `--parent`, `--pr`, `--remove-service`, `--remove-tool`, `--services`, `--set-description`, `--set-system-prompt`, `--system-prompt`, `--tags`, `--tier`, `--tools`, `--ttl`, `--vars`, `--vault-refs`, `--verbose`, `--version`, `--workspace` |
+| `agent skill edit` | `--action`, `--add-service`, `--add-tool`, `--add-var`, `--body`, `--body-file`, `--description`, `--dry-run`, `--file`, `--force`, `--from`, `--group`, `--help`, `--id`, `--idle-ttl`, `--keep-last`, `--message`, `--name`, `--new-id`, `--note`, `--parent`, `--pr`, `--remove-service`, `--remove-tool`, `--services`, `--set-description`, `--set-system-prompt`, `--system-prompt`, `--tags`, `--tier`, `--tools`, `--ttl`, `--vars`, `--vault-refs`, `--verbose`, `--version`, `--workspace` |
+| `agent skill fork` | `--action`, `--add-service`, `--add-tool`, `--add-var`, `--body`, `--body-file`, `--description`, `--dry-run`, `--file`, `--force`, `--from`, `--group`, `--help`, `--id`, `--idle-ttl`, `--keep-last`, `--message`, `--name`, `--new-id`, `--note`, `--parent`, `--pr`, `--remove-service`, `--remove-tool`, `--services`, `--set-description`, `--set-system-prompt`, `--system-prompt`, `--tags`, `--tier`, `--tools`, `--ttl`, `--vars`, `--vault-refs`, `--verbose`, `--version`, `--workspace` |
+| `agent skill insert` | `--action`, `--add-service`, `--add-tool`, `--add-var`, `--body`, `--body-file`, `--description`, `--dry-run`, `--file`, `--force`, `--from`, `--group`, `--help`, `--id`, `--idle-ttl`, `--keep-last`, `--message`, `--name`, `--new-id`, `--note`, `--parent`, `--pr`, `--remove-service`, `--remove-tool`, `--services`, `--set-description`, `--set-system-prompt`, `--system-prompt`, `--tags`, `--tier`, `--tools`, `--ttl`, `--vars`, `--vault-refs`, `--verbose`, `--version`, `--workspace` |
+| `agent skill list` | `--action`, `--add-service`, `--add-tool`, `--add-var`, `--body`, `--body-file`, `--description`, `--dry-run`, `--file`, `--force`, `--from`, `--group`, `--help`, `--id`, `--idle-ttl`, `--keep-last`, `--message`, `--name`, `--new-id`, `--note`, `--parent`, `--pr`, `--remove-service`, `--remove-tool`, `--services`, `--set-description`, `--set-system-prompt`, `--system-prompt`, `--tags`, `--tier`, `--tools`, `--ttl`, `--vars`, `--vault-refs`, `--verbose`, `--version`, `--workspace` |
+| `agent skill promote` | `--action`, `--add-service`, `--add-tool`, `--add-var`, `--body`, `--body-file`, `--description`, `--dry-run`, `--file`, `--force`, `--from`, `--group`, `--help`, `--id`, `--idle-ttl`, `--keep-last`, `--message`, `--name`, `--new-id`, `--note`, `--parent`, `--pr`, `--remove-service`, `--remove-tool`, `--services`, `--set-description`, `--set-system-prompt`, `--system-prompt`, `--tags`, `--tier`, `--tools`, `--ttl`, `--vars`, `--vault-refs`, `--verbose`, `--version`, `--workspace` |
+| `agent skill register` | `--action`, `--add-service`, `--add-tool`, `--add-var`, `--body`, `--body-file`, `--description`, `--dry-run`, `--file`, `--force`, `--from`, `--group`, `--help`, `--id`, `--idle-ttl`, `--keep-last`, `--message`, `--name`, `--new-id`, `--note`, `--parent`, `--pr`, `--remove-service`, `--remove-tool`, `--services`, `--set-description`, `--set-system-prompt`, `--system-prompt`, `--tags`, `--tier`, `--tools`, `--ttl`, `--vars`, `--vault-refs`, `--verbose`, `--version`, `--workspace` |
+| `agent skill restore` | `--action`, `--add-service`, `--add-tool`, `--add-var`, `--body`, `--body-file`, `--description`, `--dry-run`, `--file`, `--force`, `--from`, `--group`, `--help`, `--id`, `--idle-ttl`, `--keep-last`, `--message`, `--name`, `--new-id`, `--note`, `--parent`, `--pr`, `--remove-service`, `--remove-tool`, `--services`, `--set-description`, `--set-system-prompt`, `--system-prompt`, `--tags`, `--tier`, `--tools`, `--ttl`, `--vars`, `--vault-refs`, `--verbose`, `--version`, `--workspace` |
+| `agent skill show` | `--action`, `--add-service`, `--add-tool`, `--add-var`, `--body`, `--body-file`, `--description`, `--dry-run`, `--file`, `--force`, `--from`, `--group`, `--help`, `--id`, `--idle-ttl`, `--keep-last`, `--message`, `--name`, `--new-id`, `--note`, `--parent`, `--pr`, `--remove-service`, `--remove-tool`, `--services`, `--set-description`, `--set-system-prompt`, `--system-prompt`, `--tags`, `--tier`, `--tools`, `--ttl`, `--vars`, `--vault-refs`, `--verbose`, `--version`, `--workspace` |
+| `agent skill trash-list` | `--action`, `--add-service`, `--add-tool`, `--add-var`, `--body`, `--body-file`, `--description`, `--dry-run`, `--file`, `--force`, `--from`, `--group`, `--help`, `--id`, `--idle-ttl`, `--keep-last`, `--message`, `--name`, `--new-id`, `--note`, `--parent`, `--pr`, `--remove-service`, `--remove-tool`, `--services`, `--set-description`, `--set-system-prompt`, `--system-prompt`, `--tags`, `--tier`, `--tools`, `--ttl`, `--vars`, `--vault-refs`, `--verbose`, `--version`, `--workspace` |
+| `agent skill validate` | `--action`, `--add-service`, `--add-tool`, `--add-var`, `--body`, `--body-file`, `--description`, `--dry-run`, `--file`, `--force`, `--from`, `--group`, `--help`, `--id`, `--idle-ttl`, `--keep-last`, `--message`, `--name`, `--new-id`, `--note`, `--parent`, `--pr`, `--remove-service`, `--remove-tool`, `--services`, `--set-description`, `--set-system-prompt`, `--system-prompt`, `--tags`, `--tier`, `--tools`, `--ttl`, `--vars`, `--vault-refs`, `--verbose`, `--version`, `--workspace` |
+| `agent skill version-list` | `--action`, `--add-service`, `--add-tool`, `--add-var`, `--body`, `--body-file`, `--description`, `--dry-run`, `--file`, `--force`, `--from`, `--group`, `--help`, `--id`, `--idle-ttl`, `--keep-last`, `--message`, `--name`, `--new-id`, `--note`, `--parent`, `--pr`, `--remove-service`, `--remove-tool`, `--services`, `--set-description`, `--set-system-prompt`, `--system-prompt`, `--tags`, `--tier`, `--tools`, `--ttl`, `--vars`, `--vault-refs`, `--verbose`, `--version`, `--workspace` |
+| `agent skill version-save` | `--action`, `--add-service`, `--add-tool`, `--add-var`, `--body`, `--body-file`, `--description`, `--dry-run`, `--file`, `--force`, `--from`, `--group`, `--help`, `--id`, `--idle-ttl`, `--keep-last`, `--message`, `--name`, `--new-id`, `--note`, `--parent`, `--pr`, `--remove-service`, `--remove-tool`, `--services`, `--set-description`, `--set-system-prompt`, `--system-prompt`, `--tags`, `--tier`, `--tools`, `--ttl`, `--vars`, `--vault-refs`, `--verbose`, `--version`, `--workspace` |
+| `agent skill version-set-active` | `--action`, `--add-service`, `--add-tool`, `--add-var`, `--body`, `--body-file`, `--description`, `--dry-run`, `--file`, `--force`, `--from`, `--group`, `--help`, `--id`, `--idle-ttl`, `--keep-last`, `--message`, `--name`, `--new-id`, `--note`, `--parent`, `--pr`, `--remove-service`, `--remove-tool`, `--services`, `--set-description`, `--set-system-prompt`, `--system-prompt`, `--tags`, `--tier`, `--tools`, `--ttl`, `--vars`, `--vault-refs`, `--verbose`, `--version`, `--workspace` |
+| `agent test` | `--help` |
+| `agent test run` | `--help`, `--mode`, `--suite`, `--workspace` |
+| `agent ticket` | `--help` |
+| `agent ticket assign` | `--help`, `--json`, `--owner`, `--reason`, `--workspace` |
+| `agent ticket claim` | `--help`, `--json`, `--lease-ttl`, `--workspace` |
+| `agent ticket comment` | `--body`, `--help`, `--json`, `--workspace` |
+| `agent ticket create` | `--description`, `--help`, `--json`, `--owner`, `--status`, `--tags`, `--title`, `--workspace` |
+| `agent ticket delete` | `--help`, `--json`, `--reason`, `--workspace` |
+| `agent ticket handoff` | `--body`, `--help`, `--json`, `--to`, `--workspace` |
+| `agent ticket link` | `--help`, `--json`, `--session-id`, `--trace-id`, `--vibekanban-task`, `--workflow`, `--workflow-run`, `--workspace` |
+| `agent ticket list` | `--help`, `--json`, `--mine`, `--status`, `--tag`, `--workspace` |
+| `agent ticket release` | `--help`, `--json`, `--reason`, `--workspace` |
+| `agent ticket show` | `--help`, `--json`, `--workspace` |
+| `agent ticket status` | `--help`, `--json`, `--reason`, `--status`, `--workspace` |
+| `agent tool` | `--help` |
+| `agent tool add` | `--help`, `--kind`, `--name`, `--source`, `--ttl`, `--version`, `--workspace` |
+| `agent tool allow` | `--help`, `--name`, `--workspace` |
+| `agent tool deny` | `--help`, `--name`, `--target`, `--workspace` |
+| `agent tool list` | `--help`, `--workspace` |
+| `agent tool remove` | `--help`, `--name`, `--workspace` |
+| `agent tool restore` | `--help`, `--recycle-dir`, `--workspace` |
+| `agent tool trash-list` | `--help`, `--workspace` |
+| `agent tool undeny` | `--help`, `--name`, `--target`, `--workspace` |
+| `agent tool version-list` | `--help`, `--name`, `--workspace` |
+| `agent tool version-restore` | `--help`, `--name`, `--version`, `--workspace` |
+| `agent trace` | `--help` |
+| `agent trace assert` | `--has-attr`, `--has-span`, `--help`, `--trace-id`, `--workspace` |
+| `agent trace disable` | `--help`, `--workspace` |
+| `agent trace enable` | `--help`, `--workspace` |
+| `agent trace get` | `--help` |
+| `agent trace level` | `--help`, `--workspace` |
+| `agent trace status` | `--help`, `--workspace` |
+| `agent ttl` | `--help` |
+| `agent ttl clear` | `--help`, `--workspace` |
+| `agent ttl extend` | `--by`, `--help`, `--workspace` |
+| `agent ttl list` | `--expiring-within`, `--help`, `--reason`, `--type`, `--workspace` |
+| `agent ttl set` | `--help`, `--idle-ttl`, `--keep-last`, `--reason`, `--ttl`, `--workspace` |
+| `agent ttl show` | `--help`, `--workspace` |
+| `agent usage` | `--help`, `--json`, `--workspace` |
+| `agent vars` | `--help` |
+| `agent vars delete` | `--help`, `--key`, `--workspace` |
+| `agent vars get` | `--help`, `--key`, `--workspace` |
+| `agent vars list` | `--help`, `--workspace` |
+| `agent vars set` | `--hard-lock`, `--help`, `--key`, `--soft-lock`, `--type`, `--value`, `--workspace` |
+| `agent workflow` | `--help`, `--workspace` |
+| `agent workflow approve` | `--help`, `--node`, `--payload`, `--workspace` |
+| `agent workflow build` | `--description`, `--help`, `--output`, `--template`, `--workspace` |
+| `agent workflow cancel` | `--help`, `--workspace` |
+| `agent workflow catalog` | `--help`, `--workspace` |
+| `agent workflow create` | `--description`, `--force`, `--help`, `--idle-ttl`, `--keep-last`, `--ttl`, `--workspace` |
+| `agent workflow delete` | `--force`, `--help`, `--workspace` |
+| `agent workflow duplicate` | `--force`, `--help`, `--idle-ttl`, `--keep-last`, `--ttl`, `--workspace` |
+| `agent workflow edit` | `--help`, `--id`, `--workspace` |
+| `agent workflow export` | `--help`, `--workspace` |
+| `agent workflow import` | `--force`, `--help`, `--id`, `--idle-ttl`, `--keep-last`, `--ttl`, `--workspace` |
+| `agent workflow list` | `--help`, `--status`, `--workspace` |
+| `agent workflow logs` | `--help`, `--tail`, `--workspace` |
+| `agent workflow output` | `--help`, `--workspace` |
+| `agent workflow reject` | `--help`, `--node`, `--reason`, `--workspace` |
+| `agent workflow resume` | `--help`, `--reply`, `--workspace` |
+| `agent workflow retry` | `--help`, `--workspace` |
+| `agent workflow run` | `--bootstrap`, `--detached`, `--help`, `--input`, `--reset-session`, `--resume`, `--session`, `--ticket`, `--workspace`, `--worktree` |
+| `agent workflow schedule` | `--help`, `--workspace` |
+| `agent workflow status` | `--help`, `--workspace` |
+| `agent workflow validate` | `--help`, `--workspace` |
+| `agent ws` | `--help` |
+| `agent ws bootstrap-cert` | `--capability`, `--expiry-seconds`, `--help`, `--provider`, `--workspace` |
+| `agent ws claude` | `--help`, `--no-launch`, `--principal`, `--role`, `--workspace`, `--worktree` |
+| `agent ws commit-policy` | `--help`, `--message`, `--skip-scope-check`, `--token-env`, `--token-stdin`, `--workspace`, `--worktree` |
+| `agent ws create` | `--allowed-services`, `--chat-model`, `--company`, `--help`, `--model`, `--owner-email`, `--repo`, `--skills`, `--ttl`, `--workspace` |
+| `agent ws delete` | `--force`, `--help`, `--workspace` |
+| `agent ws duplicate` | `--from`, `--help`, `--workspace` |
+| `agent ws exec` | `--help`, `--principal`, `--role`, `--workspace`, `--worktree` |
+| `agent ws promote-policy` | `--dry-run`, `--help`, `--message`, `--pr`, `--verbose`, `--workspace` |
+| `agent ws purge` | `--help`, `--workspace` |
+| `agent ws repair-keys` | `--dry-run`, `--help`, `--verify`, `--workspace` |
+| `agent ws restore` | `--help`, `--workspace` |
+| `agent ws run` | `--help`, `--max-turns`, `--principal`, `--prompt`, `--reset-session`, `--resume`, `--role`, `--session`, `--skills`, `--workspace`, `--worktree` |
+| `agent ws set-primary` | `--help`, `--workspace` |
+| `agent ws shell` | `--help`, `--principal`, `--role`, `--workspace`, `--worktree` |
+| `agent ws skill` | `--action`, `--hard-lock`, `--help`, `--id`, `--soft-lock`, `--workspace` |
+| `agent ws trash-list` | `--help` |
+| `platform_cli loop_create` | — |
+| `platform_cli loop_disable` | — |
+| `platform_cli loop_edit` | — |
+| `platform_cli loop_enable` | — |
+| `platform_cli loop_fire` | — |
+| `platform_cli loop_list` | — |
+| `platform_cli loop_pause` | — |
+| `platform_cli loop_resume` | — |
+| `platform_cli loop_show` | — |
+| `platform_cli loop_status` | — |
+| `platform_cli policy_set` | — |
+| `platform_cli policy_show` | — |
+| `platform_cli policy_trace` | — |
+| `platform_cli prompt_template_get` | — |
+| `platform_cli prompt_template_list` | — |
+| `platform_cli prompt_template_set` | — |
+| `platform_cli repo_register` | — |
+| `platform_cli secret_get_meta` | — |
+| `platform_cli secret_list` | — |
+| `platform_cli secret_set` | — |
+| `platform_cli service_create` | — |
+| `platform_cli service_list` | — |
+| `platform_cli service_show` | — |
+| `platform_cli service_validate` | — |
+| `platform_cli skill_create` | — |
+| `platform_cli skill_edit` | — |
+| `platform_cli skill_insert` | — |
+| `platform_cli skill_list` | — |
+| `platform_cli skill_show` | — |
+| `platform_cli skill_validate` | — |
+| `platform_cli skill_version_save` | — |
+| `platform_cli ticket_comment` | — |
+| `platform_cli ticket_create` | — |
+| `platform_cli ticket_link` | — |
+| `platform_cli ticket_list` | — |
+| `platform_cli ticket_show` | — |
+| `platform_cli ticket_status` | — |
+| `platform_cli ttl_clear` | — |
+| `platform_cli ttl_extend` | — |
+| `platform_cli ttl_list` | — |
+| `platform_cli ttl_set` | — |
+| `platform_cli ttl_show` | — |
+| `platform_cli vars_get` | — |
+| `platform_cli vars_list` | — |
+| `platform_cli vars_set` | — |
+| `platform_cli workflow_approve` | — |
+| `platform_cli workflow_cancel` | — |
+| `platform_cli workflow_catalog` | — |
+| `platform_cli workflow_create` | — |
+| `platform_cli workflow_edit` | — |
+| `platform_cli workflow_list` | — |
+| `platform_cli workflow_output` | — |
+| `platform_cli workflow_reject` | — |
+| `platform_cli workflow_resume` | — |
+| `platform_cli workflow_run` | — |
+| `platform_cli workflow_status` | — |
+| `platform_cli workflow_stop` | — |
+| `platform_cli workflow_validate` | — |
+| `platform_cli ws_skill_insert` | — |
+<!-- agent-cli-surface:end -->
 
 ## Doctor + Probe — preflight and smoke test for the CLI path
 ```bash
@@ -77,7 +333,7 @@ bash bin/agent-cli-doctor.sh      # linux/wsl
 # + key sub-trees (ticket, tool, ws, ws skill, skill, workflow, llm, audit). No dispatch, no LLM,
 # no state mutation. Validates the Cobra wire-up after any cmd/agent/cmd/ reorg.
 bash bin/agent-cli-probe.sh       # linux/wsl
-# Expected: 96/96 pass (23 top-level + 73 sub-verbs/aliases)
+# Expected: 120/120 pass (25 probed top-level + 95 sub-verbs/aliases)
 ```
 
 Both use the same SSH defaults/env overrides as the `agent-cli.sh` wrapper. The doctor
@@ -496,7 +752,7 @@ For the canonical Alice-Dev.to demo flow, see `tests/alice_backend_baseline.py` 
 
 **`workflow run --input` takes ONE JSON object, not `k=v` pairs.** The flag is parsed with `json.Unmarshal`, so use `--input '{"start_url":"https://x","max_pages":2}'`. The `--input name=foo --input repo=bar` form does NOT work (last value wins, and it isn't valid JSON).
 
-**`ws exec -- <cmd>` can't pass dash-flags to the inner command.** Cobra parses any `-x` after `--` as its own flag (`bash -c`, `bash -lc`, `find -type` all fail with "unknown flag"). Workarounds: run dash-free commands (`ls <path>`), or use raw `kubectl exec` via the `cluster`/`hetzner-ssh` skill for anything needing flags.
+**`ws exec -- <cmd>` can't pass dash-flags to the inner command.** Cobra parses any `-x` after `--` as its own flag (`bash -c`, `bash -lc`, `find -type` all fail with "unknown flag"). Workarounds: run dash-free commands (`ls <path>`), or ask the cluster admin to run raw `kubectl exec` for anything needing flags.
 
 **Creating / editing a workflow from a local YAML (CLI-native, both paths).** Authoring a workflow is a fixed lifecycle — follow it in order:
 
